@@ -1,0 +1,6 @@
+# Runtime dependencies for the Gemini Live BidiAgent.
+# For local microphone/speaker + terminal I/O, also install: strands-agents[bidi-io]
+# (requires the system portaudio library; see README.md).
+strands-agents[bidi,bidi-gemini]>=1.0.0
+strands-agents-tools>=0.1.0
+python-dotenv>=1.0.0

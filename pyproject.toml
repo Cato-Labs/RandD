@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gemini-bidi-agent"
+version = "0.1.0"
+description = "A fully-featured Strands BidiAgent powered by the Gemini Live API (gemini-3.1-flash-live-preview)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "ImRonAI" }]
+keywords = ["strands", "gemini", "gemini-live", "bidirectional-streaming", "voice-agent", "realtime"]
+
+dependencies = [
+    # Strands bidirectional streaming core + Gemini Live provider.
+    "strands-agents[bidi,bidi-gemini]>=1.0.0",
+    # Built-in tools (calculator, current_time, stop, ...).
+    "strands-agents-tools>=0.1.0",
+    # Load configuration from a .env file.
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+# Local microphone/speaker + terminal I/O (PyAudio + prompt-toolkit).
+# Requires the system portaudio library (see README for platform setup).
+io = ["strands-agents[bidi-io]>=1.0.0"]
+# FastAPI WebSocket server example.
+server = ["fastapi>=0.110.0", "uvicorn>=0.29.0", "websockets>=12.0"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
+
+[project.scripts]
+gemini-bidi-agent = "gemini_bidi_agent.app:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gemini_bidi_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
