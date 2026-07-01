@@ -15,3 +15,7 @@ python /home/runner/work/RandD/RandD/scripts/migrate_phase1.py \
   --db-path /absolute/path/str_qc.sqlite \
   --fail-on-error
 ```
+
+Notes:
+- The migration enables `PRAGMA foreign_keys=ON` on its connection and the schema also declares it.
+- Plaintext secrets found in CSV inputs (for example WiFi password/door code) are surfaced as migration issues and are not stored as raw values.
