@@ -1,2 +1,12 @@
 __pycache__/
 *.pyc
+
+# Secrets / credentials — never commit
+.env
+*.env
+coral-pipe-*.json
+gmail_credentials.json
+gmail_token.json
+
+# Nested upstream clone (strands-agents/harness-sdk) — not part of this repo
+harness-sdk/
