@@ -10,3 +10,12 @@ gmail_token.json
 
 # Nested upstream clone (strands-agents/harness-sdk) — not part of this repo
 harness-sdk/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Backend
+backend/.backend-venv/
+backend/.venv/
+backend/workspace/
