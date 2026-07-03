@@ -19,6 +19,7 @@ import type {
   AgentCard,
   ConnectionStatus,
   LiveMessage,
+  LiveModel,
   LiveSegment,
   LiveToolPart,
   LiveUsage,
@@ -39,9 +40,9 @@ type SubmitPayload = {
   files: { url: string; mediaType: string; filename?: string }[];
 };
 
-const wsUrl = (mode: SessionMode, voice: string) => {
+const wsUrl = (mode: SessionMode, voice: string, provider: string) => {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/ws?mode=${mode}&voice=${encodeURIComponent(voice)}`;
+  return `${proto}://${window.location.host}/ws?mode=${mode}&voice=${encodeURIComponent(voice)}&provider=${encodeURIComponent(provider)}`;
 };
 
 export const useLiveAgent = () => {
@@ -54,7 +55,9 @@ export const useLiveAgent = () => {
   const [micActive, setMicActive] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [mode, setMode] = useState<SessionMode>("audio");
-  const [voice, setVoice] = useState("Puck");
+  const [voice, setVoiceState] = useState("Puck");
+  const [model, setModelState] = useState<LiveModel["id"]>("gemini");
+  const [models, setModels] = useState<LiveModel[]>([]);
   const [micDeviceId, setMicDeviceId] = useState<string | undefined>();
   const [agentCard, setAgentCard] = useState<AgentCard | null>(null);
   const [voices, setVoices] = useState<LiveVoice[]>([]);
@@ -99,11 +102,31 @@ export const useLiveAgent = () => {
   useEffect(() => {
     refreshAgentCard();
     refreshWorkspace();
-    fetch("/api/voices")
-      .then((res) => (res.ok ? res.json() : { voices: [] }))
-      .then((data: { voices: LiveVoice[] }) => setVoices(data.voices))
-      .catch(() => setVoices([]));
+    fetch("/api/models")
+      .then((res) => (res.ok ? res.json() : { default: "gemini", models: [] }))
+      .then((data: { default: LiveModel["id"]; models: LiveModel[] }) => {
+        setModels(data.models);
+        setModelState(data.default);
+      })
+      .catch(() => setModels([]));
   }, [refreshAgentCard, refreshWorkspace]);
+
+  useEffect(() => {
+    fetch(`/api/voices?provider=${model}`)
+      .then((res) => (res.ok ? res.json() : { voices: [] }))
+      .then((data: { voices: LiveVoice[] }) => {
+        setVoices(data.voices);
+        // Snap the voice to this provider's list if the current one isn't valid for it.
+        if (data.voices.length) {
+          setVoiceState((prev) =>
+            data.voices.some((entry) => entry.id === prev)
+              ? prev
+              : models.find((entry) => entry.id === model)?.defaultVoice ?? data.voices[0].id
+          );
+        }
+      })
+      .catch(() => setVoices([]));
+  }, [model, models]);
 
   const appendText = useCallback((role: "user" | "assistant", text: string) => {
     setMessages((prev) => {
@@ -382,7 +405,7 @@ export const useLiveAgent = () => {
     setError(null);
     setStatus("connecting");
     playerRef.current = new PcmPlayer(setSpeaking);
-    const socket = new WebSocket(wsUrl(mode, voice));
+    const socket = new WebSocket(wsUrl(mode, voice, model));
     socketRef.current = socket;
     socket.onmessage = (message) => {
       try {
@@ -400,7 +423,37 @@ export const useLiveAgent = () => {
       setStatus("disconnected");
       setChatStatus("error");
     };
-  }, [disconnect, handleEvent, mode, voice]);
+  }, [disconnect, handleEvent, mode, voice, model]);
+
+  const [pendingReconnect, setPendingReconnect] = useState(false);
+
+  /** Switch vended provider. If a session is live, reconnects seamlessly. */
+  const setModel = useCallback(
+    (next: LiveModel["id"]) => {
+      if (next === model) return;
+      setModelState(next);
+      const defaultVoice = models.find((entry) => entry.id === next)?.defaultVoice;
+      if (defaultVoice) setVoiceState(defaultVoice);
+      if (socketRef.current) setPendingReconnect(true);
+    },
+    [model, models]
+  );
+
+  /** Pick a voice for the current provider. If a session is live, reconnects with it. */
+  const setVoice = useCallback(
+    (next: string) => {
+      if (next === voice) return;
+      setVoiceState(next);
+      if (socketRef.current) setPendingReconnect(true);
+    },
+    [voice]
+  );
+
+  useEffect(() => {
+    if (!pendingReconnect) return;
+    setPendingReconnect(false);
+    void connect();
+  }, [pendingReconnect, connect]);
 
   const startMic = useCallback(
     async (deviceId?: string) => {
@@ -486,6 +539,9 @@ export const useLiveAgent = () => {
     voice,
     setVoice,
     voices,
+    model,
+    setModel,
+    models,
     connect,
     disconnect,
     // conversation

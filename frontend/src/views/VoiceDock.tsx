@@ -1,5 +1,19 @@
-import { AudioLinesIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
+import { AudioLinesIcon, BrainCircuitIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
 import { useState } from "react";
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorDescription,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorModelId,
+  ModelSelectorName,
+  ModelSelectorTrigger,
+  ModelSelectorVendor,
+} from "@/components/ai-elements/model-selector";
 import { Persona } from "@/components/ai-elements/persona";
 import {
   Transcription,
@@ -24,6 +38,7 @@ import {
 } from "@/components/ai-elements/voice-selector";
 import { Button } from "@/components/ui/button";
 import type { LiveAgent } from "@/hooks/use-live-agent";
+import type { LiveModel } from "@/lib/live-types";
 
 /** Voice dock: live persona, session controls, voice picker, rolling transcript. */
 export const VoiceDock = ({ agent }: { agent: LiveAgent }) => {
@@ -61,6 +76,42 @@ export const VoiceDock = ({ agent }: { agent: LiveAgent }) => {
         )}
       </div>
 
+      <ModelSelector
+        onValueChange={(value) => value && agent.setModel(value as LiveModel["id"])}
+        value={agent.model}
+      >
+        <ModelSelectorTrigger asChild>
+          <Button className="w-full justify-start" variant="outline">
+            <BrainCircuitIcon className="size-4" />
+            Model:{" "}
+            {agent.models.find((entry) => entry.id === agent.model)?.name ??
+              agent.model}
+          </Button>
+        </ModelSelectorTrigger>
+        <ModelSelectorContent title="Choose a realtime model">
+          <ModelSelectorInput placeholder="Search models…" />
+          <ModelSelectorList>
+            <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
+            <ModelSelectorGroup heading="Realtime voice models">
+              {agent.models.map((entry) => (
+                <ModelSelectorItem key={entry.id} value={entry.id}>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <ModelSelectorName>{entry.name}</ModelSelectorName>
+                      <ModelSelectorVendor>{entry.vendor}</ModelSelectorVendor>
+                    </div>
+                    <ModelSelectorDescription>
+                      {entry.description}
+                    </ModelSelectorDescription>
+                    <ModelSelectorModelId>{entry.modelId}</ModelSelectorModelId>
+                  </div>
+                </ModelSelectorItem>
+              ))}
+            </ModelSelectorGroup>
+          </ModelSelectorList>
+        </ModelSelectorContent>
+      </ModelSelector>
+
       <VoiceSelector onValueChange={(value) => value && agent.setVoice(value)} value={agent.voice}>
         <VoiceSelectorTrigger asChild>
           <Button className="w-full justify-start" variant="outline">
@@ -68,11 +119,15 @@ export const VoiceDock = ({ agent }: { agent: LiveAgent }) => {
             Voice: {agent.voice}
           </Button>
         </VoiceSelectorTrigger>
-        <VoiceSelectorContent title="Choose a Gemini Live voice">
+        <VoiceSelectorContent title="Choose a voice">
           <VoiceSelectorInput placeholder="Search voices…" />
           <VoiceSelectorList>
             <VoiceSelectorEmpty>No voices found.</VoiceSelectorEmpty>
-            <VoiceSelectorGroup heading="Gemini Live prebuilt voices">
+            <VoiceSelectorGroup
+              heading={`${
+                agent.models.find((entry) => entry.id === agent.model)?.name ?? agent.model
+              } voices`}
+            >
               {agent.voices.map((voice) => (
                 <VoiceSelectorItem key={voice.id} value={voice.id}>
                   <div className="flex flex-col gap-1">
