@@ -1,0 +1,515 @@
+/**
+ * useLiveAgent — single source of truth for a live Gemini Live session.
+ *
+ * Connects to the FastAPI bridge (`/ws`), streams mic PCM up and folds every
+ * BidiAgent output event (transcripts, audio, tool use/results, usage,
+ * interruptions) into UI state consumed directly by AI Elements components.
+ * All data is live agent output — nothing is simulated.
+ */
+
+import { nanoid } from "nanoid";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  base64ToBytes,
+  MicCapture,
+  PcmPlayer,
+  pcm16ToWavBlob,
+} from "@/lib/audio";
+import type {
+  AgentCard,
+  ConnectionStatus,
+  LiveMessage,
+  LiveSegment,
+  LiveToolPart,
+  LiveUsage,
+  LiveVoice,
+  PersonaState,
+  QueueEntry,
+  SessionMode,
+} from "@/lib/live-types";
+
+const MIC_SAMPLE_RATE = 16000;
+
+type ChatStatus = "ready" | "submitted" | "streaming" | "error";
+
+type ServerEvent = Record<string, unknown> & { type: string };
+
+type SubmitPayload = {
+  text: string;
+  files: { url: string; mediaType: string; filename?: string }[];
+};
+
+const wsUrl = (mode: SessionMode, voice: string) => {
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${window.location.host}/ws?mode=${mode}&voice=${encodeURIComponent(voice)}`;
+};
+
+export const useLiveAgent = () => {
+  const [status, setStatus] = useState<ConnectionStatus>("disconnected");
+  const [chatStatus, setChatStatus] = useState<ChatStatus>("ready");
+  const [messages, setMessages] = useState<LiveMessage[]>([]);
+  const [segments, setSegments] = useState<LiveSegment[]>([]);
+  const [queue, setQueue] = useState<QueueEntry[]>([]);
+  const [usage, setUsage] = useState<LiveUsage | null>(null);
+  const [micActive, setMicActive] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [mode, setMode] = useState<SessionMode>("audio");
+  const [voice, setVoice] = useState("Puck");
+  const [micDeviceId, setMicDeviceId] = useState<string | undefined>();
+  const [agentCard, setAgentCard] = useState<AgentCard | null>(null);
+  const [voices, setVoices] = useState<LiveVoice[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+
+  const socketRef = useRef<WebSocket | null>(null);
+  const micRef = useRef<MicCapture | null>(null);
+  const playerRef = useRef<PcmPlayer | null>(null);
+  const audioChunksRef = useRef<Uint8Array[]>([]);
+  const audioRateRef = useRef(24000);
+  const sessionStartRef = useRef(0);
+  const chatStatusRef = useRef<ChatStatus>("ready");
+  const queueRef = useRef<QueueEntry[]>([]);
+  const micActiveRef = useRef(false);
+
+  chatStatusRef.current = chatStatus;
+  queueRef.current = queue;
+  micActiveRef.current = micActive;
+
+  const refreshAgentCard = useCallback(async () => {
+    try {
+      const res = await fetch("/api/agent");
+      if (res.ok) setAgentCard(await res.json());
+    } catch {
+      // backend not up yet — the connect flow surfaces errors
+    }
+  }, []);
+
+  const refreshWorkspace = useCallback(async () => {
+    try {
+      const res = await fetch("/api/workspace");
+      if (res.ok) {
+        const data = (await res.json()) as { files: string[] };
+        setWorkspaceFiles(data.files);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAgentCard();
+    refreshWorkspace();
+    fetch("/api/voices")
+      .then((res) => (res.ok ? res.json() : { voices: [] }))
+      .then((data: { voices: LiveVoice[] }) => setVoices(data.voices))
+      .catch(() => setVoices([]));
+  }, [refreshAgentCard, refreshWorkspace]);
+
+  const appendText = useCallback((role: "user" | "assistant", text: string) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next.at(-1);
+      if (last && last.role === role) {
+        const parts = [...last.parts];
+        const lastPart = parts.at(-1);
+        if (lastPart?.type === "text" && lastPart.state === "streaming") {
+          parts[parts.length - 1] = {
+            ...lastPart,
+            text: lastPart.text + text,
+          };
+        } else {
+          parts.push({ type: "text", text, state: "streaming" });
+        }
+        next[next.length - 1] = { ...last, parts };
+        return next;
+      }
+      next.push({
+        id: nanoid(),
+        role,
+        parts: [{ type: "text", text, state: "streaming" }],
+        createdAt: Date.now(),
+      });
+      return next;
+    });
+    const now = (performance.now() - sessionStartRef.current) / 1000;
+    setSegments((prev) => [
+      ...prev,
+      {
+        id: nanoid(),
+        text,
+        role,
+        startSecond: now,
+        endSecond: now + Math.max(0.3, text.length * 0.05),
+      },
+    ]);
+  }, []);
+
+  const finalizeAssistantTurn = useCallback(() => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next.at(-1);
+      if (last?.role !== "assistant") return prev;
+      const parts = last.parts.map((part) =>
+        part.type === "text" ? { ...part, state: "done" as const } : part
+      );
+      let audioUrl = last.audioUrl;
+      if (audioChunksRef.current.length > 0) {
+        const blob = pcm16ToWavBlob(audioChunksRef.current, audioRateRef.current);
+        audioUrl = URL.createObjectURL(blob);
+        audioChunksRef.current = [];
+      }
+      next[next.length - 1] = { ...last, parts, audioUrl };
+      return next;
+    });
+  }, []);
+
+  const upsertToolPart = useCallback((part: LiveToolPart) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      let last = next.at(-1);
+      if (!last || last.role !== "assistant") {
+        last = {
+          id: nanoid(),
+          role: "assistant",
+          parts: [],
+          createdAt: Date.now(),
+        };
+        next.push(last);
+      }
+      const parts = [...last.parts];
+      const index = parts.findIndex(
+        (existing) =>
+          existing.type.startsWith("tool-") &&
+          (existing as LiveToolPart).toolCallId === part.toolCallId
+      );
+      if (index >= 0) {
+        parts[index] = { ...(parts[index] as LiveToolPart), ...part };
+      } else {
+        parts.push(part);
+      }
+      next[next.length - 1] = { ...last, parts };
+      return next;
+    });
+  }, []);
+
+  const sendRaw = useCallback((payload: Record<string, unknown>) => {
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(payload));
+    }
+  }, []);
+
+  const deliver = useCallback(
+    (entry: SubmitPayload) => {
+      if (entry.text.trim()) {
+        appendUserMessage(entry);
+        sendRaw({ type: "bidi_text_input", text: entry.text, role: "user" });
+      }
+      for (const file of entry.files) {
+        if (file.mediaType.startsWith("image/")) {
+          const base64 = file.url.split(",")[1] ?? "";
+          sendRaw({
+            type: "bidi_image_input",
+            image: base64,
+            mime_type: file.mediaType,
+          });
+        }
+      }
+      setChatStatus("submitted");
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sendRaw]
+  );
+
+  const appendUserMessage = useCallback((entry: SubmitPayload) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nanoid(),
+        role: "user",
+        parts: [
+          ...entry.files.map((file) => ({
+            type: "file" as const,
+            url: file.url,
+            mediaType: file.mediaType,
+            filename: file.filename,
+          })),
+          ...(entry.text.trim()
+            ? [{ type: "text" as const, text: entry.text, state: "done" as const }]
+            : []),
+        ],
+        createdAt: Date.now(),
+      },
+    ]);
+  }, []);
+
+  const drainQueue = useCallback(() => {
+    const pending = queueRef.current.find((entry) => entry.status === "pending");
+    if (!pending) return;
+    setQueue((prev) =>
+      prev.map((entry) =>
+        entry.id === pending.id ? { ...entry, status: "completed" } : entry
+      )
+    );
+    deliver(pending);
+  }, [deliver]);
+
+  const handleEvent = useCallback(
+    (event: ServerEvent) => {
+      switch (event.type) {
+        case "bidi_connection_start": {
+          setStatus("connected");
+          sessionStartRef.current = performance.now();
+          break;
+        }
+        case "bidi_response_start": {
+          setChatStatus("streaming");
+          break;
+        }
+        case "bidi_transcript_stream": {
+          const role = event.role === "user" ? "user" : "assistant";
+          const text = String(event.text ?? "");
+          if (text) appendText(role, text);
+          if (role === "assistant") setChatStatus("streaming");
+          break;
+        }
+        case "bidi_audio_stream": {
+          const audio = String(event.audio ?? "");
+          const rate = Number(event.sample_rate ?? 24000);
+          audioRateRef.current = rate;
+          audioChunksRef.current.push(base64ToBytes(audio));
+          playerRef.current?.play(audio, rate);
+          break;
+        }
+        case "bidi_interruption": {
+          playerRef.current?.flush();
+          audioChunksRef.current = [];
+          break;
+        }
+        case "tool_use_stream": {
+          const toolUse = (event.current_tool_use ?? {}) as {
+            toolUseId?: string;
+            name?: string;
+            input?: unknown;
+          };
+          if (!toolUse.toolUseId || !toolUse.name) break;
+          upsertToolPart({
+            type: `tool-${toolUse.name}`,
+            toolCallId: toolUse.toolUseId,
+            toolName: toolUse.name,
+            state: "input-available",
+            input: toolUse.input ?? {},
+          });
+          break;
+        }
+        case "tool_result": {
+          const result = (event.tool_result ?? {}) as {
+            toolUseId?: string;
+            status?: string;
+            content?: { text?: string; json?: unknown }[];
+          };
+          if (!result.toolUseId) break;
+          const output = (result.content ?? [])
+            .map((block) =>
+              block.text ?? (block.json ? JSON.stringify(block.json, null, 2) : "")
+            )
+            .join("\n");
+          const name = String(event.tool_name ?? "");
+          upsertToolPart({
+            type: `tool-${name || "unknown"}`,
+            toolCallId: result.toolUseId,
+            toolName: name || "unknown",
+            state: result.status === "error" ? "output-error" : "output-available",
+            input: (event.tool_input ?? {}) as unknown,
+            output,
+            errorText: result.status === "error" ? output : undefined,
+          });
+          refreshWorkspace();
+          if (name === "load_tool") refreshAgentCard();
+          break;
+        }
+        case "bidi_response_complete": {
+          finalizeAssistantTurn();
+          setChatStatus("ready");
+          drainQueue();
+          break;
+        }
+        case "bidi_usage": {
+          setUsage({
+            inputTokens: Number(event.input_tokens ?? 0),
+            outputTokens: Number(event.output_tokens ?? 0),
+            totalTokens: Number(event.total_tokens ?? 0),
+          });
+          break;
+        }
+        case "bidi_error": {
+          setError(String(event.error ?? "unknown error"));
+          setChatStatus("error");
+          break;
+        }
+        case "bidi_connection_close": {
+          setStatus("disconnected");
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [
+      appendText,
+      drainQueue,
+      finalizeAssistantTurn,
+      refreshAgentCard,
+      refreshWorkspace,
+      upsertToolPart,
+    ]
+  );
+
+  const disconnect = useCallback(async () => {
+    micRef.current?.stop();
+    micRef.current = null;
+    setMicActive(false);
+    await playerRef.current?.close();
+    playerRef.current = null;
+    socketRef.current?.close();
+    socketRef.current = null;
+    setStatus("disconnected");
+    setChatStatus("ready");
+  }, []);
+
+  const connect = useCallback(async () => {
+    await disconnect();
+    setError(null);
+    setStatus("connecting");
+    playerRef.current = new PcmPlayer(setSpeaking);
+    const socket = new WebSocket(wsUrl(mode, voice));
+    socketRef.current = socket;
+    socket.onmessage = (message) => {
+      try {
+        handleEvent(JSON.parse(message.data as string) as ServerEvent);
+      } catch {
+        // malformed frame; ignore
+      }
+    };
+    socket.onclose = () => {
+      setStatus("disconnected");
+      setMicActive(false);
+    };
+    socket.onerror = () => {
+      setError("WebSocket connection failed — is the backend running?");
+      setStatus("disconnected");
+      setChatStatus("error");
+    };
+  }, [disconnect, handleEvent, mode, voice]);
+
+  const startMic = useCallback(
+    async (deviceId?: string) => {
+      const capture = new MicCapture(MIC_SAMPLE_RATE, (chunk) => {
+        sendRaw({
+          type: "bidi_audio_input",
+          audio: chunk,
+          format: "pcm",
+          sample_rate: MIC_SAMPLE_RATE,
+          channels: 1,
+        });
+      });
+      await capture.start(deviceId ?? micDeviceId);
+      micRef.current = capture;
+      setMicActive(true);
+    },
+    [micDeviceId, sendRaw]
+  );
+
+  const stopMic = useCallback(async () => {
+    await micRef.current?.stop();
+    micRef.current = null;
+    setMicActive(false);
+  }, []);
+
+  const selectMicDevice = useCallback(
+    async (deviceId: string) => {
+      setMicDeviceId(deviceId);
+      if (micActiveRef.current) {
+        await startMic(deviceId);
+      }
+    },
+    [startMic]
+  );
+
+  const submit = useCallback(
+    (payload: SubmitPayload) => {
+      if (!payload.text.trim() && payload.files.length === 0) return;
+      if (chatStatusRef.current === "streaming" || chatStatusRef.current === "submitted") {
+        setQueue((prev) => [
+          ...prev,
+          { id: nanoid(), status: "pending", ...payload },
+        ]);
+        return;
+      }
+      deliver(payload);
+    },
+    [deliver]
+  );
+
+  const cancelQueued = useCallback((id: string) => {
+    setQueue((prev) => prev.filter((entry) => entry.id !== id));
+  }, []);
+
+  const retryUserMessage = useCallback(
+    (message: LiveMessage) => {
+      const text = message.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+      if (text) submit({ text, files: [] });
+    },
+    [submit]
+  );
+
+  const personaState: PersonaState = useMemo(() => {
+    if (status !== "connected") return "asleep";
+    if (speaking) return "speaking";
+    if (chatStatus === "submitted" || chatStatus === "streaming") return "thinking";
+    if (micActive) return "listening";
+    return "idle";
+  }, [status, speaking, chatStatus, micActive]);
+
+  useEffect(() => () => void disconnect(), [disconnect]);
+
+  return {
+    // session
+    status,
+    chatStatus,
+    error,
+    mode,
+    setMode,
+    voice,
+    setVoice,
+    voices,
+    connect,
+    disconnect,
+    // conversation
+    messages,
+    segments,
+    usage,
+    submit,
+    retryUserMessage,
+    // queue
+    queue,
+    cancelQueued,
+    // audio
+    micActive,
+    micDeviceId,
+    startMic,
+    stopMic,
+    selectMicDevice,
+    speaking,
+    personaState,
+    // agent metadata
+    agentCard,
+    workspaceFiles,
+    refreshWorkspace,
+  };
+};
+
+export type LiveAgent = ReturnType<typeof useLiveAgent>;
