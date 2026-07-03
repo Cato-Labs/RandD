@@ -7,6 +7,7 @@ from strands_tools import editor, environment, http_request, load_tool, mcp_clie
 
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
+from app.tool_libraries import list_library_tools
 
 # Default matches the vendored strands-py BidiGeminiLiveModel (this repo's agent).
 # Override with GEMINI_LIVE_MODEL if needed.
@@ -16,6 +17,7 @@ TOOLS = [
     editor.editor,
     shell.shell,
     load_tool.load_tool,
+    list_library_tools,
     mcp_client.mcp_client,
     http_request,  # module-based tool (TOOL_SPEC + function)
     environment,  # module-based tool (TOOL_SPEC + function)

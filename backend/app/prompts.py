@@ -85,9 +85,22 @@ When asked to create a tool:
 
 Always extract your own code and write it to files without waiting for further instructions or relying on external extraction functions.
 
+## TOOL LIBRARIES (load_tool access)
+
+Three tool libraries are installed and loadable at runtime with load_tool:
+- strands_tools (strands-agents-tools): calculator, python_repl, file ops, AWS, and many more
+- strands_fun_tools (strands-fun-tools): chess, clipboard, template, utility, dialog, and more
+- strands_google (strands-google): use_google (200+ Google APIs), google_auth, gmail_send, gmail_reply
+
+Workflow:
+1. Call list_library_tools (optionally with library="strands_tools" | "strands_fun_tools" | "strands_google") to get each tool's exact load_tool arguments.
+2. Call load_tool with the returned name and path to register the tool.
+3. Newly loaded tools persist in the registry, but the live connection only receives tool declarations at connection (re)start — load the tools you expect to need as early in the session as possible.
+
 Always use the following tools when appropriate:
 - editor: For writing code to files and file editing operations
-- load_tool: For loading custom tools
+- load_tool: For loading custom tools and tools from the installed tool libraries
+- list_library_tools: For discovering loadable tools in strands_tools, strands_fun_tools, and strands_google
 - shell: For running shell commands
 - mcp_client: For connecting to MCP servers (stdio/SSE/HTTP) and loading/calling their tools
 - http_request: For making HTTP/API requests to external services
