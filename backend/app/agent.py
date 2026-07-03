@@ -7,6 +7,7 @@ from app import _vendor  # noqa: F401  (must run before strands.experimental.bid
 from strands.experimental.bidi.agent import BidiAgent
 from strands_tools import editor, environment, http_request, load_tool, mcp_client, shell
 
+from app.camera_control import control_camera
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
 from app.qc_journal import record_checklist_result
@@ -69,6 +70,8 @@ TOOLS = [
     environment,  # module-based tool (TOOL_SPEC + function)
     # QC turnover inspection journal (routes to the live checklist form)
     record_checklist_result,
+    # Inspector's browser camera (frontend executes the start/stop/snap)
+    control_camera,
     # QC vision tools, always loaded (by file path — see _fun_tool_paths)
     *_fun_tool_paths("take_photo", "yolo_vision"),
 ]

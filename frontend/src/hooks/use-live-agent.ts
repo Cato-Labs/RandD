@@ -72,6 +72,12 @@ export const useLiveAgent = () => {
   const micRef = useRef<MicCapture | null>(null);
   const cameraRef = useRef<CameraCapture | null>(null);
   const lastFrameRef = useRef<string | null>(null);
+  const cameraControlRef = useRef<{
+    start: () => Promise<void>;
+    stop: () => void;
+    snap: () => boolean;
+  } | null>(null);
+  const handledCameraCallsRef = useRef<Set<string>>(new Set());
   const playerRef = useRef<PcmPlayer | null>(null);
   const audioChunksRef = useRef<Uint8Array[]>([]);
   const audioRateRef = useRef(24000);
@@ -322,6 +328,20 @@ export const useLiveAgent = () => {
             input?: unknown;
           };
           if (!toolUse.toolUseId || !toolUse.name) break;
+          // The agent drives the browser camera through this tool.
+          if (toolUse.name === "control_camera") {
+            const action = String(
+              (toolUse.input as { action?: string } | undefined)?.action ?? ""
+            ).toLowerCase();
+            const key = `${toolUse.toolUseId}:${action}`;
+            if (action && !handledCameraCallsRef.current.has(key)) {
+              handledCameraCallsRef.current.add(key);
+              const camera = cameraControlRef.current;
+              if (action === "start") void camera?.start();
+              if (action === "stop") camera?.stop();
+              if (action === "snap") camera?.snap();
+            }
+          }
           upsertToolPart({
             type: `tool-${toolUse.name}`,
             toolCallId: toolUse.toolUseId,
@@ -555,6 +575,15 @@ export const useLiveAgent = () => {
 
   /** Latest camera frame (base64 JPEG) — used to pin photos onto checklist items. */
   const getLatestFrame = useCallback(() => lastFrameRef.current, []);
+
+  // Let the agent's control_camera tool drive the browser camera.
+  useEffect(() => {
+    cameraControlRef.current = {
+      start: startCamera,
+      stop: stopCamera,
+      snap: snapPhoto,
+    };
+  }, [startCamera, stopCamera, snapPhoto]);
 
   const selectMicDevice = useCallback(
     async (deviceId: string) => {
