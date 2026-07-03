@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from strands_tools import editor, environment, http_request, load_tool, mcp_client, shell
 
-from app.agent import DEFAULT_MODEL_ID, create_agent
+from app.agent import DEFAULT_MODEL_ID, DEFAULT_PROVIDER, PROVIDERS, create_agent
 from app.io import BidiWebSocketInput, BidiWebSocketOutput
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
@@ -30,16 +30,34 @@ app.add_middleware(
 )
 app.mount("/workspace", StaticFiles(directory=WORKSPACE_DIR), name="workspace")
 
-VOICES = [
-    {"id": "Puck", "name": "Puck", "gender": "male", "accent": "American", "age": "adult", "description": "Upbeat male voice."},
-    {"id": "Charon", "name": "Charon", "gender": "male", "accent": "American", "age": "adult", "description": "Informative, deep male voice."},
-    {"id": "Kore", "name": "Kore", "gender": "female", "accent": "American", "age": "adult", "description": "Firm female voice."},
-    {"id": "Fenrir", "name": "Fenrir", "gender": "male", "accent": "American", "age": "adult", "description": "Excitable male voice."},
-    {"id": "Aoede", "name": "Aoede", "gender": "female", "accent": "American", "age": "adult", "description": "Breezy female voice."},
-    {"id": "Leda", "name": "Leda", "gender": "female", "accent": "American", "age": "youthful", "description": "Youthful female voice."},
-    {"id": "Orus", "name": "Orus", "gender": "male", "accent": "American", "age": "adult", "description": "Firm male voice."},
-    {"id": "Zephyr", "name": "Zephyr", "gender": "female", "accent": "American", "age": "adult", "description": "Bright female voice."},
-]
+VOICES: dict[str, list[dict[str, str]]] = {
+    "gemini": [
+        {"id": "Puck", "name": "Puck", "gender": "male", "accent": "American", "age": "adult", "description": "Upbeat male voice."},
+        {"id": "Charon", "name": "Charon", "gender": "male", "accent": "American", "age": "adult", "description": "Informative, deep male voice."},
+        {"id": "Kore", "name": "Kore", "gender": "female", "accent": "American", "age": "adult", "description": "Firm female voice."},
+        {"id": "Fenrir", "name": "Fenrir", "gender": "male", "accent": "American", "age": "adult", "description": "Excitable male voice."},
+        {"id": "Aoede", "name": "Aoede", "gender": "female", "accent": "American", "age": "adult", "description": "Breezy female voice."},
+        {"id": "Leda", "name": "Leda", "gender": "female", "accent": "American", "age": "youthful", "description": "Youthful female voice."},
+        {"id": "Orus", "name": "Orus", "gender": "male", "accent": "American", "age": "adult", "description": "Firm male voice."},
+        {"id": "Zephyr", "name": "Zephyr", "gender": "female", "accent": "American", "age": "adult", "description": "Bright female voice."},
+    ],
+    "openai": [
+        {"id": "alloy", "name": "Alloy", "gender": "neutral", "accent": "American", "age": "adult", "description": "Balanced neutral voice."},
+        {"id": "ash", "name": "Ash", "gender": "male", "accent": "American", "age": "adult", "description": "Warm male voice."},
+        {"id": "coral", "name": "Coral", "gender": "female", "accent": "American", "age": "adult", "description": "Bright female voice."},
+        {"id": "echo", "name": "Echo", "gender": "male", "accent": "American", "age": "adult", "description": "Resonant male voice."},
+        {"id": "sage", "name": "Sage", "gender": "female", "accent": "American", "age": "adult", "description": "Calm female voice."},
+        {"id": "shimmer", "name": "Shimmer", "gender": "female", "accent": "American", "age": "adult", "description": "Crisp female voice."},
+        {"id": "verse", "name": "Verse", "gender": "male", "accent": "American", "age": "adult", "description": "Expressive male voice."},
+        {"id": "marin", "name": "Marin", "gender": "female", "accent": "American", "age": "adult", "description": "Natural conversational voice."},
+        {"id": "cedar", "name": "Cedar", "gender": "male", "accent": "American", "age": "adult", "description": "Grounded male voice."},
+    ],
+    "nova": [
+        {"id": "matthew", "name": "Matthew", "gender": "male", "accent": "American", "age": "adult", "description": "Default American male voice."},
+        {"id": "tiffany", "name": "Tiffany", "gender": "female", "accent": "American", "age": "adult", "description": "American female voice."},
+        {"id": "amy", "name": "Amy", "gender": "female", "accent": "British", "age": "adult", "description": "British female voice."},
+    ],
+}
 
 
 @app.on_event("startup")
@@ -87,9 +105,29 @@ async def get_agent() -> dict[str, Any]:
     }
 
 
+@app.get("/api/models")
+async def get_models() -> dict[str, Any]:
+    """The enabled vended bidi providers, for the frontend model picker."""
+    return {
+        "default": DEFAULT_PROVIDER,
+        "models": [
+            {
+                "id": provider_id,
+                "name": info["name"],
+                "vendor": info["vendor"],
+                "modelId": info["model_id"],
+                "defaultVoice": info["default_voice"],
+                "description": info["description"],
+            }
+            for provider_id, info in PROVIDERS.items()
+            if info.get("enabled", True)
+        ],
+    }
+
+
 @app.get("/api/voices")
-async def get_voices() -> dict[str, Any]:
-    return {"voices": VOICES}
+async def get_voices(provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$")) -> dict[str, Any]:
+    return {"voices": VOICES[provider]}
 
 
 @app.get("/api/workspace")
@@ -107,15 +145,22 @@ async def websocket_endpoint(
     websocket: WebSocket,
     mode: str = Query("audio", pattern="^(audio|text)$"),
     voice: str = Query("Puck"),
+    provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$"),
 ) -> None:
-    """Drive one Gemini Live session with the vendored bidi harness loop.
+    """Drive one live session with the vendored bidi harness loop.
 
     ``BidiAgent.run`` owns the whole lifecycle: it starts the agent loop,
     supervises input/output tasks in the harness task group, executes tools
     concurrently, and tears everything down via ``stop_all``.
     """
     await websocket.accept()
-    agent = create_agent(mode=mode, voice=voice)
+    if not PROVIDERS.get(provider, {}).get("enabled", True):
+        await websocket.send_text(
+            json.dumps({"type": "bidi_error", "error": f"provider {provider!r} is disabled"})
+        )
+        await websocket.close()
+        return
+    agent = create_agent(mode=mode, voice=voice, provider=provider)
 
     try:
         await agent.run(

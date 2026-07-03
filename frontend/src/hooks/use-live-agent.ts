@@ -55,8 +55,8 @@ export const useLiveAgent = () => {
   const [micActive, setMicActive] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [mode, setMode] = useState<SessionMode>("audio");
-  const [voice, setVoiceState] = useState("Puck");
-  const [model, setModelState] = useState<LiveModel["id"]>("gemini");
+  const [voice, setVoiceState] = useState("alloy");
+  const [model, setModelState] = useState<LiveModel["id"]>("openai");
   const [models, setModels] = useState<LiveModel[]>([]);
   const [micDeviceId, setMicDeviceId] = useState<string | undefined>();
   const [agentCard, setAgentCard] = useState<AgentCard | null>(null);
@@ -103,7 +103,7 @@ export const useLiveAgent = () => {
     refreshAgentCard();
     refreshWorkspace();
     fetch("/api/models")
-      .then((res) => (res.ok ? res.json() : { default: "gemini", models: [] }))
+      .then((res) => (res.ok ? res.json() : { default: "openai", models: [] }))
       .then((data: { default: LiveModel["id"]; models: LiveModel[] }) => {
         setModels(data.models);
         setModelState(data.default);
