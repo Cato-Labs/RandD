@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Turnover Inspection — Lakefront Bay View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500;600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --surface:#fcf9f8;
+  --surface-container-lowest:#ffffff;
+  --surface-container-low:#f6f3f2;
+  --surface-container:#f0eded;
+  --surface-container-high:#eae7e7;
+  --on-surface:#1c1b1b;
+  --on-surface-variant:#434845;
+  --outline:#737875;
+  --outline-variant:#c3c8c4;
+  --primary:#17211d;
+  --primary-container:#2c3632;
+  --on-primary:#ffffff;
+  --on-primary-container:#949f99;
+  --primary-fixed:#dae5df;
+  --secondary:#735c00;
+  --secondary-container:#fed65b;
+  --secondary-fixed:#ffe088;
+  --secondary-fixed-dim:#e9c349;
+  --error:#ba1a1a;
+  --error-container:#ffdad6;
+  --shadow-tint:rgba(44,54,50,0.08);
+  --shadow-tint-md:rgba(44,54,50,0.14);
+  --r-sm:.25rem; --r:.5rem; --r-md:.75rem; --r-lg:1rem; --r-xl:1.5rem;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--surface);
+  color:var(--on-surface);
+  font-family:'Hanken Grotesk',system-ui,sans-serif;
+  font-size:16px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.serif{font-family:'EB Garamond',Georgia,serif}
+.label-caps{
+  font-size:12px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;line-height:1.2;
+}
+
+/* ---------- Sticky glass progress bar ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  background:rgba(252,249,248,.78);
+  border-bottom:1px solid var(--outline-variant);
+}
+.topbar-inner{
+  max-width:760px;margin:0 auto;padding:14px 20px;
+  display:flex;align-items:center;gap:16px;
+}
+.topbar .brand{color:var(--primary);font-size:18px;font-weight:600;letter-spacing:.01em;white-space:nowrap}
+.progress-wrap{flex:1;display:flex;align-items:center;gap:12px}
+.progress-track{
+  flex:1;height:6px;border-radius:9999px;background:var(--surface-container-high);overflow:hidden;
+}
+.progress-fill{
+  height:100%;width:0%;border-radius:9999px;
+  background:linear-gradient(90deg,var(--primary-container),#56615c);
+  transition:width .45s cubic-bezier(.4,0,.2,1), background .45s;
+}
+.progress-fill.complete{background:linear-gradient(90deg,var(--secondary-fixed-dim),var(--secondary-container))}
+.progress-num{font-size:14px;font-weight:600;color:var(--on-surface-variant);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ---------- Property header ---------- */
+.property-header{
+  position:relative;overflow:hidden;
+  background:
+    radial-gradient(120% 160% at 85% -20%, rgba(148,159,153,.35) 0%, transparent 55%),
+    radial-gradient(90% 130% at 10% 110%, rgba(233,195,73,.14) 0%, transparent 50%),
+    linear-gradient(160deg,#1a2420 0%, var(--primary-container) 55%, #232d29 100%);
+  color:#fff;
+}
+.property-header::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:radial-gradient(rgba(255,255,255,.05) 1px, transparent 1.4px);
+  background-size:26px 26px;opacity:.5;
+}
+.ph-inner{max-width:760px;margin:0 auto;padding:56px 20px 40px;position:relative;z-index:1}
+.ph-eyebrow{color:var(--secondary-fixed-dim);margin-bottom:14px}
+.ph-title{
+  font-family:'EB Garamond',Georgia,serif;
+  font-size:48px;font-weight:500;line-height:1.1;letter-spacing:-.02em;
+  margin-bottom:8px;
+}
+.ph-sub{color:var(--on-primary-container);font-size:16px;margin-bottom:28px}
+.ph-meta{display:flex;flex-wrap:wrap;gap:10px 28px}
+.ph-meta div{min-width:110px}
+.ph-meta .label-caps{color:rgba(255,255,255,.55);margin-bottom:3px}
+.ph-meta .val{font-size:15px;font-weight:500;color:#fff}
+.status-chip{
+  display:inline-flex;align-items:center;gap:8px;
+  margin-top:28px;padding:8px 18px;border-radius:var(--r);
+  background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);
+  font-size:13px;font-weight:600;letter-spacing:.02em;
+  transition:background .4s,border-color .4s,color .4s;
+}
+.status-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--secondary-fixed-dim);animation:pulse 2.4s ease-in-out infinite}
+.status-chip.ready{background:var(--secondary-container);border-color:var(--secondary-container);color:var(--secondary)}
+.status-chip.ready .dot{background:var(--secondary);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ---------- Main layout ---------- */
+main{max-width:760px;margin:0 auto;padding:40px 20px 96px}
+
+.section-card{
+  background:var(--surface-container-lowest);
+  border-radius:var(--r-lg);
+  box-shadow:0 2px 6px var(--shadow-tint), 0 10px 32px var(--shadow-tint);
+  margin-bottom:24px;overflow:hidden;
+}
+.section-head{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:22px 32px;cursor:pointer;user-select:none;-webkit-user-select:none;
+  transition:background .2s;
+}
+.section-head:hover{background:var(--surface-container-low)}
+.section-head:focus-visible{outline:2px solid var(--secondary-fixed-dim);outline-offset:-2px;border-radius:var(--r-lg)}
+.head-right{display:flex;align-items:center;gap:12px}
+.chevron{
+  flex:none;width:26px;height:26px;border-radius:50%;
+  display:grid;place-items:center;background:var(--surface-container-low);
+  transition:transform .35s cubic-bezier(.4,0,.2,1),background .2s;
+}
+.chevron svg{width:14px;height:14px;stroke:var(--on-surface-variant);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.section-card.open .chevron{transform:rotate(180deg);background:var(--primary-fixed)}
+.section-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.4,0,.2,1)}
+.section-body-inner{overflow:hidden;min-height:0}
+.section-card.open .section-body{grid-template-rows:1fr}
+.section-body-inner > :last-child{padding-bottom:8px}
+.section-title{font-family:'EB Garamond',Georgia,serif;font-size:24px;font-weight:500;line-height:1.3;color:var(--primary)}
+.section-count{
+  font-size:12px;font-weight:700;letter-spacing:.08em;
+  color:var(--on-surface-variant);
+  background:var(--surface-container-low);
+  padding:5px 12px;border-radius:var(--r);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+  transition:background .3s,color .3s;
+}
+.section-count.done{background:var(--secondary-fixed);color:var(--secondary)}
+.section-sub{padding:0 32px;font-size:14px;color:var(--on-surface-variant)}
+.group-label{padding:20px 32px 4px;color:var(--secondary);opacity:.9}
+.items{padding:10px 16px 20px}
+
+/* ---------- Checklist item ---------- */
+.item{border-radius:var(--r-md);transition:background .2s}
+.item + .item{margin-top:2px}
+.item-row{display:flex;align-items:center;gap:14px;padding:11px 16px;cursor:default}
+.item:hover{background:var(--surface-container-low)}
+.check-circle{
+  flex:none;width:26px;height:26px;border-radius:50%;
+  border:1.5px solid var(--outline);background:transparent;cursor:pointer;
+  display:grid;place-items:center;padding:0;
+  transition:background .25s,border-color .25s,transform .15s;
+}
+.check-circle:active{transform:scale(.9)}
+.check-circle svg{width:14px;height:14px;stroke:#fff;stroke-width:2.4;fill:none;
+  stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:20;stroke-dashoffset:20;transition:stroke-dashoffset .3s .05s;}
+.check-circle.checked{background:var(--primary-container);border-color:var(--primary-container)}
+.check-circle.checked svg{stroke-dashoffset:0}
+.check-circle:focus-visible{outline:2px solid var(--secondary-fixed-dim);outline-offset:2px}
+.item-label{flex:1;font-size:15.5px;transition:color .25s}
+.item.checked .item-label{color:var(--outline)}
+.item-actions{display:flex;gap:4px}
+.icon-btn{
+  width:34px;height:34px;border-radius:50%;border:none;background:transparent;
+  display:grid;place-items:center;cursor:pointer;color:var(--outline);
+  transition:background .2s,color .2s;position:relative;
+}
+.icon-btn:hover{background:var(--surface-container);color:var(--primary-container)}
+.icon-btn:focus-visible{outline:2px solid var(--secondary-fixed-dim);outline-offset:1px}
+.icon-btn svg{width:17px;height:17px;stroke:currentColor;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn.active{color:var(--secondary)}
+.icon-btn.active::after{
+  content:"";position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;
+  background:var(--secondary-fixed-dim);
+}
+
+/* temp input */
+.temp-input{
+  width:76px;padding:7px 10px;border-radius:var(--r);
+  border:1px solid var(--outline-variant);background:var(--surface-container-lowest);
+  font:inherit;font-size:15px;font-weight:600;text-align:center;color:var(--primary);
+  transition:border-color .2s,box-shadow .2s;
+}
+.temp-input:focus{outline:none;border-color:var(--secondary-fixed-dim);box-shadow:0 0 0 3px rgba(233,195,73,.18)}
+
+/* ---------- Detail drawer (photo + note) ---------- */
+.item-detail{
+  display:none;margin:2px 16px 10px 56px;padding:16px 18px;
+  background:var(--surface-container-low);border-radius:var(--r-md);
+  animation:reveal .25s ease;
+}
+.item-detail.open{display:block}
+@keyframes reveal{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.detail-block + .detail-block{margin-top:14px}
+.detail-block .label-caps{color:var(--on-surface-variant);margin-bottom:8px}
+.photo-drop{
+  border:1.5px dashed var(--outline-variant);border-radius:var(--r-md);
+  padding:22px;display:flex;flex-direction:column;align-items:center;gap:8px;
+  color:var(--on-surface-variant);font-size:14px;cursor:pointer;text-align:center;
+  transition:border-color .2s,background .2s;background:var(--surface-container-lowest);
+}
+.photo-drop:hover{border-color:var(--secondary-fixed-dim);background:#fff}
+.photo-drop svg{width:22px;height:22px;stroke:var(--outline);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+/* photo tag selector */
+.tag-row{display:flex;gap:6px;margin-bottom:10px}
+.tag-chip{
+  border:1px solid var(--outline-variant);background:var(--surface-container-lowest);
+  color:var(--on-surface-variant);font:inherit;font-size:12px;font-weight:600;letter-spacing:.04em;
+  padding:6px 16px;border-radius:9999px;cursor:pointer;transition:background .2s,color .2s,border-color .2s;
+}
+.tag-chip:hover{border-color:var(--outline)}
+.tag-chip.selected{background:var(--primary-container);border-color:var(--primary-container);color:#fff}
+.tag-chip:focus-visible{outline:2px solid var(--secondary-fixed-dim);outline-offset:2px}
+
+/* before / after compare pair */
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.photo-slot{
+  border:1.5px dashed var(--outline-variant);border-radius:var(--r-md);
+  min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  color:var(--outline);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  background:var(--surface-container-lowest);
+}
+.photo-slot svg{width:18px;height:18px;stroke:var(--outline-variant);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* evidence gallery */
+.gallery-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+
+.photo-card{position:relative;border-radius:var(--r-md);overflow:hidden;background:var(--surface-container-lowest);box-shadow:0 2px 8px var(--shadow-tint);animation:reveal .3s ease}
+.photo-card img{width:100%;height:140px;object-fit:cover;display:block}
+.gallery-grid .photo-card img{height:92px}
+.photo-card .badge{
+  position:absolute;top:8px;left:8px;padding:4px 10px;border-radius:9999px;
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+}
+.badge.before{background:rgba(28,27,27,.72);color:#fff}
+.badge.after{background:var(--secondary-container);color:var(--secondary)}
+.badge.evidence{background:rgba(255,255,255,.85);color:var(--primary-container)}
+.photo-card .cap{
+  position:absolute;bottom:0;left:0;right:0;padding:14px 10px 7px;
+  background:linear-gradient(transparent,rgba(28,27,27,.65));
+  color:rgba(255,255,255,.85);font-size:10.5px;font-weight:600;letter-spacing:.03em;
+}
+.photo-card .del{
+  position:absolute;top:6px;right:6px;width:24px;height:24px;
+  border:none;border-radius:50%;cursor:pointer;
+  background:rgba(28,27,27,.6);color:#fff;font-size:13px;line-height:1;
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+}
+.photo-card .del:hover{background:rgba(28,27,27,.85)}
+@media (max-width:640px){.gallery-grid{grid-template-columns:repeat(2,1fr)}}
+.note-area{
+  width:100%;min-height:76px;resize:vertical;
+  padding:12px 14px;border-radius:var(--r-md);
+  border:1px solid var(--outline-variant);background:var(--surface-container-lowest);
+  font:inherit;font-size:14.5px;line-height:1.5;color:var(--on-surface);
+  transition:border-color .2s,box-shadow .2s;
+}
+.note-area::placeholder{color:var(--outline)}
+.note-area:focus{outline:none;border-color:var(--secondary-fixed-dim);box-shadow:0 0 0 3px rgba(233,195,73,.18)}
+
+/* ---------- Repairs ---------- */
+.repairs .note-area{min-height:110px}
+.repairs-hint{padding:0 32px 4px;font-size:14px;color:var(--on-surface-variant)}
+.repairs-body{padding:16px 32px 28px}
+
+/* ---------- Summary / sign-off ---------- */
+.summary-card{
+  border-radius:var(--r-xl);padding:40px 32px;text-align:center;
+  background:
+    radial-gradient(100% 140% at 50% -30%, rgba(148,159,153,.3) 0%, transparent 60%),
+    linear-gradient(165deg,#1a2420, var(--primary-container));
+  color:#fff;box-shadow:0 14px 44px var(--shadow-tint-md);
+}
+.summary-card .laurel{width:44px;height:44px;margin:0 auto 16px;display:block;
+  stroke:var(--secondary-fixed-dim);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.summary-title{font-family:'EB Garamond',Georgia,serif;font-size:32px;font-weight:500;line-height:1.2;margin-bottom:8px}
+.summary-sub{color:var(--on-primary-container);font-size:15px;margin-bottom:28px;font-variant-numeric:tabular-nums}
+.btn-ready{
+  border:none;border-radius:9999px;padding:15px 40px;cursor:pointer;
+  font:inherit;font-size:16px;font-weight:600;letter-spacing:.01em;
+  background:rgba(255,255,255,.12);color:rgba(255,255,255,.55);
+  border:1px solid rgba(255,255,255,.16);
+  transition:background .35s,color .35s,transform .15s,box-shadow .35s;
+}
+.btn-ready.armed{
+  background:var(--secondary-container);color:var(--secondary);border-color:transparent;
+  box-shadow:0 6px 22px rgba(233,195,73,.35);cursor:pointer;
+}
+.btn-ready.armed:hover{transform:translateY(-1px)}
+.btn-ready.signed{background:#fff;color:var(--primary);box-shadow:none}
+.summary-note{margin-top:16px;font-size:13px;color:rgba(255,255,255,.45)}
+
+footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
+  font-size:13px;color:var(--outline)}
+
+@media (max-width:640px){
+  .ph-title{font-size:34px}
+  .ph-inner{padding:40px 20px 32px}
+  .section-head,.section-sub,.group-label{padding-left:20px;padding-right:20px}
+  .items{padding:8px 8px 16px}
+  .item-detail{margin-left:16px;margin-right:8px}
+  .repairs-hint,.repairs-body{padding-left:20px;padding-right:20px}
+  .topbar .brand span{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+
+<!-- Sticky progress -->
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand serif">Ron<span> · Turnover QC</span></div>
+    <div class="progress-wrap">
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-num" id="progressNum">0 / 0</div>
+    </div>
+  </div>
+</div>
+
+<!-- Property header -->
+<header class="property-header">
+  <div class="ph-inner">
+    <div class="label-caps ph-eyebrow">Master Turnover Inspection · 2026-07-03</div>
+    <h1 class="ph-title">Lakefront Bay View</h1>
+    <p class="ph-sub">701 Cove Dr, Big Bear Lake, CA 92315 · Boulder Bay</p>
+    <div class="ph-meta">
+      <div><div class="label-caps">Unit Code</div><div class="val">LBV</div></div>
+      <div><div class="label-caps">Housekeeper</div><div class="val">Bertha</div></div>
+      <div><div class="label-caps">QC Inspector</div><div class="val">Dan</div></div>
+      <div><div class="label-caps">Guest Arrival</div><div class="val">Jul 2, 2026 · 4:00 PM</div></div>
+      <div><div class="label-caps">Door Code</div><div class="val">4135</div></div>
+    </div>
+    <div class="status-chip" id="statusChip"><span class="dot"></span><span id="statusText">Turnover in progress</span></div>
+  </div>
+</header>
+
+<main>
+
+  <!-- HOT TUB -->
+  <section class="section-card" data-section>
+    <div class="section-head">
+      <h2 class="section-title">Hot Tub</h2>
+      <span class="section-count" data-count></span>
+    </div>
+    <div class="items">
+      <div class="item" data-item><div class="item-row">
+        <button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button>
+        <span class="item-label">Up and Working</span>
+        <div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row">
+        <button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button>
+        <span class="item-label">Full</span>
+        <div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row">
+        <button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button>
+        <span class="item-label">Fresh</span>
+        <div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row">
+        <button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button>
+        <span class="item-label">Clear</span>
+        <div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row">
+        <button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button>
+        <span class="item-label" style="flex:1">103</span>
+        <input class="temp-input" type="number" value="103" min="60" max="110" aria-label="Hot tub temperature in Fahrenheit">
+        <span style="font-size:14px;color:var(--on-surface-variant)">°F</span>
+        <div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+  </section>
+
+  <!-- HOUSEKEEPING -->
+  <section class="section-card" data-section>
+    <div class="section-head">
+      <h2 class="section-title">HouseKeeping</h2>
+      <span class="section-count" data-count></span>
+    </div>
+
+    <div class="label-caps group-label">Kitchen</div>
+    <div class="items">
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Dishes, glasses, and silverware are clean</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Pots, pans are clean</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Dishwasher is Empty</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Sink is Cleaned &amp; Free from Food</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Garbage Disposal is Clear &amp; Fresh</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Refrigerator is Cold and Clean</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Oven is Clean</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+
+    <div class="label-caps group-label">Bathrooms</div>
+    <div class="items">
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Towels are displayed</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Floors are mopped</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Bath tub shower is clean</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Toilet is clean and fresh</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Sink and mirrors are wiped off</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+
+    <div class="label-caps group-label">Bedroom</div>
+    <div class="items">
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">All Beds are made properly w/ skirts</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Remotes are in holders</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Closets are organized</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+
+    <div class="label-caps group-label">Home</div>
+    <div class="items">
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">House smells Normal Fresh</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">All surfaces cleaned or dusted</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">All floor have been vacuumed or mopped.</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">The house is clean and organized.</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">The home is open and welcoming</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Carpets Look Good no Stains</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+
+    <div class="label-caps group-label">Outdoors</div>
+    <div class="items">
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Walk ways and Drive way Cleaned off</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Garbage cans are Put Away</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Yard is Maintained</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">BBQ has been Cleaned</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Outdoor furniture arranged</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Windows are presentable</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+  </section>
+
+  <!-- UTILITIES -->
+  <section class="section-card" data-section>
+    <div class="section-head">
+      <h2 class="section-title">Utilities</h2>
+      <span class="section-count" data-count></span>
+    </div>
+    <p class="section-sub">Confirm each service is live before sign-off.</p>
+    <div class="items">
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Gas</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Wi-Fi</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Power</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Water</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+  </section>
+
+  <!-- GUEST WELCOME -->
+  <section class="section-card" data-section>
+    <div class="section-head">
+      <h2 class="section-title">Gifts</h2>
+      <span class="section-count" data-count></span>
+    </div>
+    <div class="items">
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Coffee &amp; Cream</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+      <div class="item" data-item><div class="item-row"><button class="check-circle" aria-label="Mark complete"><svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"/></svg></button><span class="item-label">Deodorant set up</span><div class="item-actions"></div></div><div class="item-detail"></div></div>
+    </div>
+  </section>
+
+  <!-- REPAIRS -->
+  <section class="section-card repairs">
+    <div class="section-head">
+      <h2 class="section-title">Repairs Needed</h2>
+    </div>
+    <p class="repairs-hint">Anything logged here creates a work order for facilities.</p>
+    <div class="repairs-body">
+      <textarea class="note-area" id="repairsNote" placeholder="Describe the issue, its location, and urgency…"></textarea>
+    </div>
+  </section>
+
+  <!-- SIGN-OFF -->
+  <section class="summary-card">
+    <svg class="laurel" viewBox="0 0 24 24"><path d="M12 3l2.2 4.4 4.9.7-3.5 3.5.8 4.9L12 14.2l-4.4 2.3.8-4.9L4.9 8.1l4.9-.7L12 3z"/></svg>
+    <h2 class="summary-title serif">To Sum Up</h2>
+    <p class="summary-sub" id="summarySub">0 of 0 items complete</p>
+    <button class="btn-ready" id="btnReady" disabled>Ready for guests</button>
+    <p class="summary-note" id="summaryNote">Sign-off unlocks when every item is complete.</p>
+  </section>
+
+</main>
+
+<footer>Ron AI · Turnover Quality Control · Lakefront Bay View (LBV)</footer>
+
+<script>
+(function(){
+  const CAMERA_ICON = '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>';
+  const NOTE_ICON   = '<svg viewBox="0 0 24 24"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5z"/></svg>';
+  const PHOTO_DROP  = '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>';
+
+  const items = document.querySelectorAll('[data-item]');
+  const sections = document.querySelectorAll('[data-section]');
+  const fill = document.getElementById('progressFill');
+  const num = document.getElementById('progressNum');
+  const chip = document.getElementById('statusChip');
+  const statusText = document.getElementById('statusText');
+  const summarySub = document.getElementById('summarySub');
+  const btnReady = document.getElementById('btnReady');
+  const summaryNote = document.getElementById('summaryNote');
+  let signed = false;
+
+  /* ---------- Accordion sections ---------- */
+  const CHEV_ICON = '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
+  document.querySelectorAll('.section-card').forEach(function(card, i){
+    const head = card.querySelector('.section-head');
+    if(!head) return;
+
+    // Move everything after the header into an animatable body wrapper
+    const body = document.createElement('div'); body.className = 'section-body';
+    const inner = document.createElement('div'); inner.className = 'section-body-inner';
+    body.appendChild(inner);
+    Array.prototype.slice.call(card.children).forEach(function(ch){
+      if(ch !== head) inner.appendChild(ch);
+    });
+    card.appendChild(body);
+
+    // Right cluster: count badge + chevron
+    const right = document.createElement('span'); right.className = 'head-right';
+    const count = head.querySelector('[data-count]');
+    if(count) right.appendChild(count);
+    const chev = document.createElement('span'); chev.className = 'chevron'; chev.innerHTML = CHEV_ICON;
+    right.appendChild(chev);
+    head.appendChild(right);
+
+    head.setAttribute('role','button');
+    head.tabIndex = 0;
+    function toggle(){
+      const open = card.classList.toggle('open');
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    head.addEventListener('click', toggle);
+    head.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); }
+    });
+
+    // First section starts open; the rest start collapsed
+    if(i === 0){ card.classList.add('open'); head.setAttribute('aria-expanded','true'); }
+    else head.setAttribute('aria-expanded','false');
+  });
+
+  function openSection(el){
+    const card = el.closest('.section-card');
+    if(card && !card.classList.contains('open')){
+      card.classList.add('open');
+      card.querySelector('.section-head').setAttribute('aria-expanded','true');
+    }
+  }
+
+  // Build photo + note affordances for every item
+  items.forEach(function(item, idx){
+    const actions = item.querySelector('.item-actions');
+    const detail  = item.querySelector('.item-detail');
+    const labelText = item.querySelector('.item-label').textContent.trim();
+    const slug = labelText.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    item.dataset.id = slug;
+
+    const camBtn = document.createElement('button');
+    camBtn.className = 'icon-btn'; camBtn.type = 'button';
+    camBtn.setAttribute('aria-label','Attach photo');
+    camBtn.innerHTML = CAMERA_ICON;
+
+    const noteBtn = document.createElement('button');
+    noteBtn.className = 'icon-btn'; noteBtn.type = 'button';
+    noteBtn.setAttribute('aria-label','Add note');
+    noteBtn.innerHTML = NOTE_ICON;
+
+    actions.appendChild(camBtn);
+    actions.appendChild(noteBtn);
+
+    // Detail panel: photo block + note block
+    const photoBlock = document.createElement('div');
+    photoBlock.className = 'detail-block';
+    photoBlock.innerHTML =
+      '<div class="label-caps">Photos</div>' +
+      '<div class="tag-row" role="radiogroup" aria-label="Photo type">' +
+        '<button type="button" class="tag-chip" data-tag="before">Before</button>' +
+        '<button type="button" class="tag-chip" data-tag="after">After</button>' +
+        '<button type="button" class="tag-chip selected" data-tag="evidence">Evidence</button>' +
+      '</div>' +
+      '<div class="compare-grid" style="display:none"></div>' +
+      '<div class="gallery-grid" style="display:none"></div>' +
+      '<div class="photo-drop" tabindex="0" role="button" aria-label="Add a photo">' + PHOTO_DROP +
+      '<span>Tap to add a photo</span></div>' +
+      '<input type="file" accept="image/*" capture="environment" hidden>';
+
+    const noteBlock = document.createElement('div');
+    noteBlock.className = 'detail-block';
+    noteBlock.innerHTML =
+      '<div class="label-caps">Inspector note</div>' +
+      '<textarea class="note-area" placeholder="Add a note for this item…"></textarea>';
+
+    detail.appendChild(photoBlock);
+    detail.appendChild(noteBlock);
+
+    const fileInput = photoBlock.querySelector('input[type=file]');
+    const drop = photoBlock.querySelector('.photo-drop');
+    const compare = photoBlock.querySelector('.compare-grid');
+    const gallery = photoBlock.querySelector('.gallery-grid');
+    const tagChips = photoBlock.querySelectorAll('.tag-chip');
+    const noteArea = noteBlock.querySelector('.note-area');
+
+    // photo state for this item
+    const photos = [];   // {id, src, tag, ts, source}
+    let selectedTag = 'evidence';
+    let pid = 0;
+
+    tagChips.forEach(function(chip){
+      chip.addEventListener('click', function(){
+        tagChips.forEach(function(c){ c.classList.remove('selected'); });
+        chip.classList.add('selected');
+        selectedTag = chip.getAttribute('data-tag');
+      });
+    });
+
+    function timeStr(d){
+      return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    }
+    function cardHtml(p, heightClass){
+      return '<div class="photo-card">' +
+        '<img src="' + p.src + '" alt="' + p.tag + ' photo">' +
+        '<span class="badge ' + p.tag + '">' + p.tag + '</span>' +
+        '<div class="cap">' + (p.source === 'agent' ? 'Ron · ' : '') + timeStr(p.ts) + '</div>' +
+        '<button class="del" type="button" data-pid="' + p.id + '" aria-label="Remove photo">&times;</button>' +
+      '</div>';
+    }
+    function slotHtml(p, tag){
+      if(p) return cardHtml(p);
+      return '<div class="photo-slot">' + PHOTO_DROP + '<span>' + tag + ' pending</span></div>';
+    }
+    function renderPhotos(){
+      const before = photos.find(function(p){ return p.tag === 'before'; });
+      const after  = photos.find(function(p){ return p.tag === 'after'; });
+      const evidence = photos.filter(function(p){ return p.tag === 'evidence'; });
+
+      if(before || after){
+        compare.style.display = 'grid';
+        compare.innerHTML = slotHtml(before,'before') + slotHtml(after,'after');
+      } else { compare.style.display = 'none'; compare.innerHTML = ''; }
+
+      if(evidence.length){
+        gallery.style.display = 'grid';
+        gallery.innerHTML = evidence.map(function(p){ return cardHtml(p); }).join('');
+      } else { gallery.style.display = 'none'; gallery.innerHTML = ''; }
+
+      camBtn.classList.toggle('active', photos.length > 0);
+
+      photoBlock.querySelectorAll('.del').forEach(function(btn){
+        btn.onclick = function(){
+          const id = btn.getAttribute('data-pid');
+          const i = photos.findIndex(function(p){ return String(p.id) === id; });
+          if(i > -1){ photos.splice(i,1); renderPhotos(); }
+        };
+      });
+    }
+    function addPhoto(src, tag, source){
+      tag = (tag === 'before' || tag === 'after') ? tag : 'evidence';
+      // before/after are singular slots — a new capture replaces the old one
+      if(tag !== 'evidence'){
+        const i = photos.findIndex(function(p){ return p.tag === tag; });
+        if(i > -1) photos.splice(i,1);
+      }
+      photos.push({ id: ++pid, src: src, tag: tag, ts: new Date(), source: source || 'user' });
+      openSection(item);
+      detail.classList.add('open');
+      renderPhotos();
+    }
+    item._addPhoto = addPhoto;
+    item._photos = photos;
+
+    function toggleDetail(focusEl){
+      const open = detail.classList.toggle('open');
+      if(open && focusEl) focusEl.focus();
+    }
+    camBtn.addEventListener('click', function(){
+      if(!detail.classList.contains('open')) detail.classList.add('open');
+      fileInput.click();
+    });
+    noteBtn.addEventListener('click', function(){
+      if(detail.classList.contains('open') && document.activeElement === noteArea){
+        detail.classList.remove('open');
+      } else {
+        detail.classList.add('open');
+        noteArea.focus();
+      }
+    });
+
+    drop.addEventListener('click', function(){ fileInput.click(); });
+    drop.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){e.preventDefault();fileInput.click();} });
+
+    fileInput.addEventListener('change', function(){
+      const f = fileInput.files && fileInput.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = function(e){ addPhoto(e.target.result, selectedTag, 'user'); };
+      reader.readAsDataURL(f);
+      fileInput.value = '';
+    });
+    noteArea.addEventListener('input', function(){
+      noteBtn.classList.toggle('active', noteArea.value.trim().length > 0);
+    });
+
+    // Check toggle
+    const circle = item.querySelector('.check-circle');
+    circle.addEventListener('click', function(){
+      circle.classList.toggle('checked');
+      item.classList.toggle('checked');
+      update();
+    });
+  });
+
+  function update(){
+    const total = items.length;
+    let done = 0;
+    items.forEach(function(i){ if(i.classList.contains('checked')) done++; });
+
+    const pct = total ? (done/total)*100 : 0;
+    fill.style.width = pct + '%';
+    fill.classList.toggle('complete', done === total);
+    num.textContent = done + ' / ' + total;
+    summarySub.textContent = done + ' of ' + total + ' items complete';
+
+    // per-section counts
+    sections.forEach(function(sec){
+      const secItems = sec.querySelectorAll('[data-item]');
+      let sDone = 0;
+      secItems.forEach(function(i){ if(i.classList.contains('checked')) sDone++; });
+      const badge = sec.querySelector('[data-count]');
+      badge.textContent = sDone + ' / ' + secItems.length;
+      badge.classList.toggle('done', sDone === secItems.length);
+    });
+
+    const complete = done === total;
+    if(!signed){
+      btnReady.disabled = !complete;
+      btnReady.classList.toggle('armed', complete);
+      summaryNote.textContent = complete
+        ? 'Every item checked. Confirm the home is guest-ready.'
+        : 'Sign-off unlocks when every item is complete.';
+      if(complete){
+        chip.classList.add('ready'); statusText.textContent = 'All checks complete';
+      } else {
+        chip.classList.remove('ready'); statusText.textContent = 'Turnover in progress';
+      }
+    }
+  }
+
+  btnReady.addEventListener('click', function(){
+    if(btnReady.disabled || signed) return;
+    signed = true;
+    btnReady.classList.remove('armed');
+    btnReady.classList.add('signed');
+    btnReady.textContent = '✓ Signed off — Ready for guests';
+    statusText.textContent = 'Ready for guests';
+    chip.classList.add('ready');
+    const now = new Date();
+    summaryNote.textContent = 'Signed off by Dan · ' +
+      now.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + ' at ' +
+      now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  });
+
+  update();
+
+  /* ------------------------------------------------------------------
+     Agent integration surface.
+     The bidi voice agent (camera tool) pushes captures into the checklist
+     as it takes them. Items are addressed by data-id slug, e.g.
+     "bathtub-and-shower-are-clean".
+
+       qcInspection.addPhoto('oven-is-clean', dataUrlOrHttpsUrl, 'before')
+       qcInspection.addPhoto('oven-is-clean', url, 'after')
+       qcInspection.setNote('oven-is-clean', 'Grease on back wall — re-cleaned')
+       qcInspection.setChecked('oven-is-clean', true)
+       qcInspection.getState()  -> full inspection payload for the Slack report
+  ------------------------------------------------------------------ */
+  function findItem(id){
+    return document.querySelector('[data-item][data-id="' + id + '"]');
+  }
+  window.qcInspection = {
+    addPhoto: function(id, src, tag){
+      const el = findItem(id);
+      if(el && el._addPhoto){ el._addPhoto(src, tag, 'agent'); return true; }
+      return false;
+    },
+    setNote: function(id, text){
+      const el = findItem(id);
+      if(!el) return false;
+      const area = el.querySelector('.item-detail .note-area');
+      area.value = text;
+      area.dispatchEvent(new Event('input'));
+      openSection(el);
+      el.querySelector('.item-detail').classList.add('open');
+      return true;
+    },
+    setChecked: function(id, checked){
+      const el = findItem(id);
+      if(!el) return false;
+      const circle = el.querySelector('.check-circle');
+      const isChecked = circle.classList.contains('checked');
+      if(isChecked !== !!checked) circle.click();
+      return true;
+    },
+    listItems: function(){
+      return Array.prototype.map.call(items, function(el){
+        return el.dataset.id;
+      });
+    },
+    getState: function(){
+      return {
+        property: 'LBV',
+        signedOff: signed,
+        repairs: document.getElementById('repairsNote').value,
+        items: Array.prototype.map.call(items, function(el){
+          return {
+            id: el.dataset.id,
+            label: el.querySelector('.item-label').textContent.trim(),
+            checked: el.classList.contains('checked'),
+            note: el.querySelector('.item-detail .note-area').value,
+            photos: (el._photos || []).map(function(p){
+              return { tag: p.tag, source: p.source, ts: p.ts.toISOString(), src: p.src };
+            })
+          };
+        })
+      };
+    }
+  };
+})();
+</script>
+</body>
+</html>

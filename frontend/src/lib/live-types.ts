@@ -79,6 +79,16 @@ export type LiveVoice = {
   description: string;
 };
 
+/** One vended bidi provider (Gemini Live / GPT-Realtime-2 / Nova Sonic 2). */
+export type LiveModel = {
+  id: "gemini" | "openai" | "nova";
+  name: string;
+  vendor: string;
+  modelId: string;
+  defaultVoice: string;
+  description: string;
+};
+
 export type PersonaState =
   | "idle"
   | "listening"
