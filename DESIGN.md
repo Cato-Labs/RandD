@@ -225,7 +225,10 @@ Aoede, Leda, Orus, Zephyr) served by `/api/voices` with attribute metadata rende
   load_tool], system_prompt=META_TOOLING_PROMPT + UI contract)`. Model id
   `gemini-3.1-flash-live-preview` (override with `GEMINI_LIVE_MODEL`), voice/mode from
   the WebSocket query (`?mode=audio|text&voice=Puck`). `GOOGLE_API_KEY` required.
-- `backend/app/main.py` — FastAPI: `WS /ws` (bridge, one BidiAgent per connection), `GET
+- `backend/app/main.py` — FastAPI: `WS /ws` (one BidiAgent per connection, driven end-to-end by the
+  vendored harness loop: `BidiAgent.run(inputs=[BidiWebSocketInput], outputs=[BidiWebSocketOutput])`
+  where the IO channels implement the vendored `BidiInput`/`BidiOutput` protocols — the harness owns
+  task supervision, concurrent tool execution, interruption and `stop_all` teardown), `GET
   /api/agent`, `GET /api/tools` (live tool registry — reflects `load_tool` additions), `GET
   /api/voices`, static `/workspace`. Tool execution is sandboxed to `backend/workspace/` (cwd) and
   `shell` runs non-interactive (`STRANDS_NON_INTERACTIVE=true`, `BYPASS_TOOL_CONSENT=true`).

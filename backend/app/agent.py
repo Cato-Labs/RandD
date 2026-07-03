@@ -32,4 +32,10 @@ def create_agent(mode: str, voice: str) -> BidiAgent:
         provider_config=provider_config,
         client_config=client_config,
     )
-    return BidiAgent(model=model, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
+    return BidiAgent(
+        model=model,
+        tools=TOOLS,
+        system_prompt=SYSTEM_PROMPT,
+        name="RandD Live",
+        description="Real-time Gemini Live meta-tooling agent (editor, shell, load_tool).",
+    )

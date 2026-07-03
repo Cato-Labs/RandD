@@ -1,5 +1,3 @@
-import asyncio
-import base64
 import json
 import os
 from pathlib import Path
@@ -12,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from strands_tools import editor, load_tool, shell
 
 from app.agent import DEFAULT_MODEL_ID, create_agent
+from app.io import BidiWebSocketInput, BidiWebSocketOutput
 from app.prompts import SYSTEM_PROMPT
 
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
@@ -92,78 +91,26 @@ async def get_workspace() -> dict[str, Any]:
     return {"files": sorted(files)}
 
 
-def sanitize(value: Any) -> Any:
-    if isinstance(value, bytes):
-        return base64.b64encode(value).decode("ascii")
-    if isinstance(value, dict):
-        return {str(key): sanitize(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [sanitize(item) for item in value]
-    try:
-        json.dumps(value)
-        return value
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def normalize_event(event: dict[str, Any], tool_uses: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    outgoing = sanitize(dict(event))
-
-    if outgoing.get("type") == "tool_use_stream":
-        current = outgoing.get("current_tool_use") or {}
-        if isinstance(current, dict):
-            tool_use_id = current.get("toolUseId")
-            if tool_use_id:
-                tool_uses[str(tool_use_id)] = {
-                    "name": current.get("name"),
-                    "input": current.get("input", {}),
-                }
-
-    if outgoing.get("type") == "tool_result":
-        result = outgoing.get("tool_result") or {}
-        if isinstance(result, dict):
-            tool_use_id = result.get("toolUseId")
-            prior = tool_uses.get(str(tool_use_id), {}) if tool_use_id else {}
-            outgoing["tool_name"] = prior.get("name", "")
-            outgoing["tool_input"] = prior.get("input", {})
-
-    if outgoing.get("type") == "bidi_usage":
-        outgoing["input_tokens"] = outgoing.get("input_tokens", outgoing.get("inputTokens", 0))
-        outgoing["output_tokens"] = outgoing.get("output_tokens", outgoing.get("outputTokens", 0))
-        outgoing["total_tokens"] = outgoing.get("total_tokens", outgoing.get("totalTokens", 0))
-
-    return outgoing
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
     mode: str = Query("audio", pattern="^(audio|text)$"),
     voice: str = Query("Puck"),
 ) -> None:
+    """Drive one Gemini Live session with the vendored bidi harness loop.
+
+    ``BidiAgent.run`` owns the whole lifecycle: it starts the agent loop,
+    supervises input/output tasks in the harness task group, executes tools
+    concurrently, and tears everything down via ``stop_all``.
+    """
     await websocket.accept()
     agent = create_agent(mode=mode, voice=voice)
-    tool_uses: dict[str, dict[str, Any]] = {}
 
     try:
-        await agent.start()
-
-        async def reader() -> None:
-            async for raw in websocket.iter_text():
-                data = json.loads(raw)
-                if isinstance(data, dict) and data.get("type") in {
-                    "bidi_text_input",
-                    "bidi_audio_input",
-                    "bidi_image_input",
-                }:
-                    await agent.send(data)
-
-        async def writer() -> None:
-            async for event in agent.receive():
-                outgoing = normalize_event(event, tool_uses)
-                await websocket.send_text(json.dumps(outgoing, default=str))
-
-        await asyncio.gather(reader(), writer())
+        await agent.run(
+            inputs=[BidiWebSocketInput(websocket)],
+            outputs=[BidiWebSocketOutput(websocket)],
+        )
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -171,8 +118,6 @@ async def websocket_endpoint(
             await websocket.send_text(json.dumps({"type": "bidi_error", "error": str(exc)}))
         except Exception:
             pass
-    finally:
-        await agent.stop()
 
 
 if __name__ == "__main__":
