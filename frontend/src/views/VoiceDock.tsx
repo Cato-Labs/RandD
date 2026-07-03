@@ -14,7 +14,6 @@ import {
   ModelSelectorTrigger,
   ModelSelectorVendor,
 } from "@/components/ai-elements/model-selector";
-import { Persona } from "@/components/ai-elements/persona";
 import {
   Transcription,
   TranscriptionSegment,
@@ -39,19 +38,36 @@ import {
 import { Button } from "@/components/ui/button";
 import type { LiveAgent } from "@/hooks/use-live-agent";
 import type { LiveModel } from "@/lib/live-types";
+import { cn } from "@/lib/utils";
 
-/** Voice dock: live persona, session controls, voice picker, rolling transcript. */
+/**
+ * Lightweight CSS status orb. Replaces the AI Elements Rive `Persona`,
+ * whose WebGL2/WASM init hard-locks the main thread in this environment
+ * (remote .riv blob + webgl2 context), freezing the whole app.
+ */
+const StatusOrb = ({ state }: { state: string }) => (
+  <div
+    aria-label={`agent ${state}`}
+    className={cn(
+      "size-24 rounded-full border-4 transition-all duration-500",
+      state === "listening" && "animate-pulse border-emerald-400 bg-emerald-400/20",
+      state === "thinking" && "animate-pulse border-amber-400 bg-amber-400/20",
+      state === "speaking" && "animate-pulse border-sky-400 bg-sky-400/30",
+      state === "asleep" && "border-muted bg-muted/30",
+      state === "idle" && "border-muted-foreground/40 bg-muted/50"
+    )}
+    role="img"
+  />
+);
+
+/** Voice dock: live status orb, session controls, voice picker, rolling transcript. */
 export const VoiceDock = ({ agent }: { agent: LiveAgent }) => {
   const [transcriptTime, setTranscriptTime] = useState(0);
 
   return (
     <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-sidebar p-4">
       <div className="flex flex-col items-center gap-2">
-        <Persona
-          className="size-40"
-          state={agent.personaState}
-          variant="halo"
-        />
+        <StatusOrb state={agent.personaState} />
         <p className="font-medium text-sm">{agent.agentCard?.name ?? "RandD Live"}</p>
         <p className="text-muted-foreground text-xs capitalize">
           {agent.personaState}
