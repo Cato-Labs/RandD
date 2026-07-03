@@ -56,6 +56,7 @@ const toWorkspaceUrl = (path: string): string => {
 };
 
 const JOURNAL_TOOLS = new Set(["record_checklist_result", "journal"]);
+const ITEM_PHOTO_TOOLS = new Set(["attach_item_photo"]);
 const PHOTO_TOOLS = new Set(["take_photo", "capture_photo"]);
 
 /** Returns true when the part changed the checklist. */
@@ -92,6 +93,21 @@ const applyToolPart = (
           api.addPhoto(slug, `data:image/jpeg;base64,${frame}`, tag) || changed;
       }
     }
+    return changed;
+  }
+
+  // Pin the just-taken camera frame onto any line item (evidence default),
+  // optionally setting the item's narrative note in the same call.
+  if (ITEM_PHOTO_TOOLS.has(part.toolName)) {
+    if (!slug) return false;
+    let changed = false;
+    const frame = getLatestFrame?.();
+    if (frame) {
+      const tag = firstString(input.photo_tag, input.tag) ?? "evidence";
+      changed = api.addPhoto(slug, `data:image/jpeg;base64,${frame}`, tag) || changed;
+    }
+    const note = firstString(input.notes, input.note);
+    if (note) changed = api.setNote(slug, note) || changed;
     return changed;
   }
 
@@ -139,7 +155,7 @@ export const InspectionView = ({
         // Journal edits apply as soon as the call's input is known; photo edits
         // need the tool output (the captured file paths).
         const journalReady =
-          JOURNAL_TOOLS.has(part.toolName) &&
+          (JOURNAL_TOOLS.has(part.toolName) || ITEM_PHOTO_TOOLS.has(part.toolName)) &&
           (part.state === "input-available" || part.state === "output-available");
         const photoReady = PHOTO_TOOLS.has(part.toolName) && part.state === "output-available";
         if (!journalReady && !photoReady) continue;
