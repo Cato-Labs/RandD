@@ -223,7 +223,7 @@ Aoede, Leda, Orus, Zephyr) served by `/api/voices` with attribute metadata rende
 
 - `backend/app/agent.py` — builds `BidiAgent(model=BidiGeminiLiveModel(...), tools=[editor, shell,
   load_tool], system_prompt=META_TOOLING_PROMPT + UI contract)`. Model id
-  `gemini-2.5-flash-native-audio-preview-12-2025` (override with `GEMINI_LIVE_MODEL`), voice/mode from
+  `gemini-3.1-flash-live-preview` (override with `GEMINI_LIVE_MODEL`), voice/mode from
   the WebSocket query (`?mode=audio|text&voice=Puck`). `GOOGLE_API_KEY` required.
 - `backend/app/main.py` — FastAPI: `WS /ws` (bridge, one BidiAgent per connection), `GET
   /api/agent`, `GET /api/tools` (live tool registry — reflects `load_tool` additions), `GET

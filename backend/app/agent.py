@@ -1,18 +1,21 @@
 import os
 
+from app import _vendor  # noqa: F401  (must run before strands.experimental.bidi imports)
 from strands.experimental.bidi.agent import BidiAgent
 from strands.experimental.bidi.models.gemini_live import BidiGeminiLiveModel
 from strands_tools import editor, load_tool, shell
 
 from app.prompts import SYSTEM_PROMPT
 
-DEFAULT_MODEL_ID = "gemini-2.5-flash-native-audio-preview-12-2025"
+# Default matches the vendored strands-py BidiGeminiLiveModel (this repo's agent).
+# Override with GEMINI_LIVE_MODEL if needed.
+DEFAULT_MODEL_ID = "gemini-3.1-flash-live-preview"
 
 TOOLS = [editor.editor, shell.shell, load_tool.load_tool]
 
 
 def create_agent(mode: str, voice: str) -> BidiAgent:
-    """Create one Gemini Live BidiAgent for a WebSocket connection."""
+    """Create one Gemini Live BidiAgent (repo-vendored bidi implementation) per connection."""
     model_id = os.getenv("GEMINI_LIVE_MODEL", DEFAULT_MODEL_ID)
     provider_config = {"audio": {"voice": voice}}
 
