@@ -85,7 +85,7 @@ const PromptQueue = ({ agent }: { agent: LiveAgent }) => {
   if (agent.queue.length === 0) return null;
   return (
     <Queue className="mx-auto mb-2 w-full max-w-3xl">
-      <QueueSection defaultOpen value="pending">
+      <QueueSection defaultOpen>
         <QueueSectionTrigger>
           <QueueSectionLabel count={pending.length} label="Queued prompts" />
         </QueueSectionTrigger>
@@ -109,7 +109,7 @@ const PromptQueue = ({ agent }: { agent: LiveAgent }) => {
         </QueueSectionContent>
       </QueueSection>
       {completed.length > 0 && (
-        <QueueSection value="completed">
+        <QueueSection>
           <QueueSectionTrigger>
             <QueueSectionLabel count={completed.length} label="Sent" />
           </QueueSectionTrigger>

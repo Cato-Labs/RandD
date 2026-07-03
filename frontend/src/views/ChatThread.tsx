@@ -107,10 +107,7 @@ const ShellSandbox = ({ part }: { part: LiveToolPart }) => {
       : JSON.stringify(input ?? {}, null, 2);
   return (
     <Sandbox>
-      <SandboxHeader
-        icon={<TerminalIcon className="size-4" />}
-        title={`shell — ${part.state === "output-error" ? "error" : part.state}`}
-      />
+      <SandboxHeader state={part.state} title="shell" />
       <SandboxContent>
         <SandboxTabs defaultValue="command">
           <SandboxTabsBar>
