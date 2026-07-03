@@ -1,5 +1,6 @@
 import {
   AudioLinesIcon,
+  ClipboardCheckIcon,
   MessageSquareTextIcon,
   PanelRightIcon,
 } from "lucide-react";
@@ -9,6 +10,7 @@ import { useLiveAgent } from "@/hooks/use-live-agent";
 import { AgentPanel } from "@/views/AgentPanel";
 import { ChatThread } from "@/views/ChatThread";
 import { Composer } from "@/views/Composer";
+import { InspectionView } from "@/views/InspectionView";
 import { VoiceDock } from "@/views/VoiceDock";
 import { WorkflowView } from "@/views/WorkflowView";
 
@@ -16,6 +18,7 @@ const App = () => {
   const agent = useLiveAgent();
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [inspectionOpen, setInspectionOpen] = useState(false);
 
   return (
     <div className="flex h-full flex-col">
@@ -23,7 +26,10 @@ const App = () => {
         <div className="flex items-center gap-2">
           <span className="font-semibold">RandD Live</span>
           <span className="text-muted-foreground text-xs">
-            {agent.agentCard?.model ?? "Gemini Live"} ·{" "}
+            {agent.models.find((entry) => entry.id === agent.model)?.name ??
+              agent.agentCard?.model ??
+              "Gemini Live"}{" "}
+            ·{" "}
             <span
               className={
                 agent.status === "connected"
@@ -53,6 +59,14 @@ const App = () => {
             Voice
           </Button>
           <Button
+            onClick={() => setInspectionOpen((open) => !open)}
+            size="sm"
+            variant={inspectionOpen ? "secondary" : "ghost"}
+          >
+            <ClipboardCheckIcon className="size-4" />
+            Inspection
+          </Button>
+          <Button
             onClick={() => setAgentPanelOpen((open) => !open)}
             size="sm"
             variant={agentPanelOpen ? "secondary" : "ghost"}
@@ -72,7 +86,14 @@ const App = () => {
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
           {workflowOpen && <WorkflowView agent={agent} />}
-          <ChatThread agent={agent} />
+          {/* Always mounted so checklist state persists and agent edits land
+              in real time; it auto-surfaces whenever the agent updates it. */}
+          <InspectionView
+            agent={agent}
+            onAgentEdit={() => setInspectionOpen(true)}
+            open={inspectionOpen}
+          />
+          {!inspectionOpen && <ChatThread agent={agent} />}
           <Composer
             agent={agent}
             onToggleWorkflow={() => setWorkflowOpen((open) => !open)}
