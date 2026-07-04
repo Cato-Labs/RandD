@@ -61,6 +61,12 @@ class BidiWebSocketInput:
             if event_type == "bidi_audio_input":
                 return BidiAudioInputEvent(**data)
             if event_type == "bidi_image_input":
+                # Tee the frame so capture tools (take_photo/take_video) can
+                # grab the device camera's view server-side.
+                from app.browser_camera import add_frame
+
+                if isinstance(data.get("image"), str):
+                    add_frame(data["image"])
                 return BidiImageInputEvent(**data)
 
 

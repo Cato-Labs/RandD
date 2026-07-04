@@ -12,10 +12,10 @@ from strands_google.gmail_helpers import gmail_reply, gmail_send
 from strands_google.use_google import use_google
 
 from app.camera_control import control_camera
+from app.capture_tools import take_photo, take_video
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
 from app.qc_journal import attach_item_photo, list_checklist_items, record_checklist_result
-from app.take_video import take_video
 from app.tool_libraries import list_library_tools
 
 # Default matches the vendored strands-py BidiGeminiLiveModel (this repo's agent).
@@ -87,10 +87,11 @@ TOOLS = [
     google_auth,
     gmail_send,
     gmail_reply,
-    # QC vision tools, always loaded (by file path — see _fun_tool_paths)
-    *_fun_tool_paths("take_photo", "yolo_vision"),
-    # Server-camera video clips (take_photo's sibling; device camcorder = browser)
+    # Device-camera capture: browser stream first, server hardware fallback
+    take_photo,
     take_video,
+    # QC vision tools, always loaded (by file path — see _fun_tool_paths)
+    *_fun_tool_paths("yolo_vision"),
 ]
 
 
