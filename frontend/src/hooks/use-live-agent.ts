@@ -76,6 +76,7 @@ export const useLiveAgent = () => {
     start: () => Promise<void>;
     stop: () => void;
     snap: () => boolean;
+    flip: () => Promise<void>;
   } | null>(null);
   const handledCameraCallsRef = useRef<Set<string>>(new Set());
   const playerRef = useRef<PcmPlayer | null>(null);
@@ -340,6 +341,7 @@ export const useLiveAgent = () => {
               if (action === "start") void camera?.start();
               if (action === "stop") camera?.stop();
               if (action === "snap") camera?.snap();
+              if (action === "flip") void camera?.flip();
             }
           }
           upsertToolPart({
@@ -510,6 +512,7 @@ export const useLiveAgent = () => {
   }, []);
 
   /** Start the device camera (browser getUserMedia) and stream frames to the model. */
+  const cameraFacingRef = useRef<"environment" | "user">("environment");
   const startCamera = useCallback(
     async (deviceId?: string) => {
       cameraRef.current?.stop();
@@ -521,7 +524,7 @@ export const useLiveAgent = () => {
           mime_type: "image/jpeg",
         });
       });
-      await capture.start(deviceId ?? cameraDeviceId);
+      await capture.start(deviceId ?? cameraDeviceId, cameraFacingRef.current);
       cameraRef.current = capture;
       setCameraStream(capture.mediaStream);
       setCameraActive(true);
@@ -573,6 +576,15 @@ export const useLiveAgent = () => {
     return Boolean(frame);
   }, [sendRaw]);
 
+  /** Switch between front and rear cameras (agent "flip" or manual). */
+  const flipCamera = useCallback(async () => {
+    cameraFacingRef.current = cameraFacingRef.current === "environment" ? "user" : "environment";
+    setCameraDeviceId(undefined);
+    if (cameraRef.current) {
+      await startCamera(undefined);
+    }
+  }, [startCamera]);
+
   /** Latest camera frame (base64 JPEG) — used to pin photos onto checklist items. */
   const getLatestFrame = useCallback(() => lastFrameRef.current, []);
 
@@ -582,8 +594,9 @@ export const useLiveAgent = () => {
       start: startCamera,
       stop: stopCamera,
       snap: snapPhoto,
+      flip: flipCamera,
     };
-  }, [startCamera, stopCamera, snapPhoto]);
+  }, [startCamera, stopCamera, snapPhoto, flipCamera]);
 
   const selectMicDevice = useCallback(
     async (deviceId: string) => {
@@ -675,6 +688,7 @@ export const useLiveAgent = () => {
     stopCamera,
     selectCameraDevice,
     snapPhoto,
+    flipCamera,
     getLatestFrame,
     // agent metadata
     agentCard,

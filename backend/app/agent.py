@@ -1,6 +1,4 @@
-import importlib.util
 import os
-from pathlib import Path
 from typing import Any
 
 from app import _vendor  # noqa: F401  (must run before strands.experimental.bidi imports)
@@ -17,6 +15,7 @@ from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
 from app.qc_journal import attach_item_photo, list_checklist_items, record_checklist_result
 from app.tool_libraries import list_library_tools
+from app.vision_tools import yolo_vision
 
 # Default matches the vendored strands-py BidiGeminiLiveModel (this repo's agent).
 # Override with GEMINI_LIVE_MODEL if needed.
@@ -55,16 +54,6 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 
-def _fun_tool_paths(*module_names: str) -> list[str]:
-    """File paths of strands_fun_tools modules, loadable without importing the
-    package __init__ (it pulls in pyautogui, which dies headless)."""
-    spec = importlib.util.find_spec("strands_fun_tools")
-    if spec is None or not spec.submodule_search_locations:
-        return []
-    base = Path(next(iter(spec.submodule_search_locations)))
-    return [str(base / f"{name}.py") for name in module_names if (base / f"{name}.py").exists()]
-
-
 TOOLS = [
     editor.editor,
     shell.shell,
@@ -90,8 +79,8 @@ TOOLS = [
     # Device-camera capture: browser stream first, server hardware fallback
     take_photo,
     take_video,
-    # QC vision tools, always loaded (by file path — see _fun_tool_paths)
-    *_fun_tool_paths("yolo_vision"),
+    # YOLO object detection over the device-camera stream
+    yolo_vision,
 ]
 
 

@@ -8,7 +8,7 @@ The confirmation string tells the model what to expect next.
 
 from strands import tool
 
-_ACTIONS = ("start", "stop", "snap")
+_ACTIONS = ("start", "stop", "snap", "flip")
 
 
 @tool
@@ -22,14 +22,15 @@ def control_camera(action: str) -> str:
     Args:
         action: "start" to turn the camera on and begin receiving live frames,
             "stop" to turn it off, "snap" to capture one full-quality frame
-            right now (camera must already be on).
+            right now (camera must already be on), "flip" to switch between
+            the front and rear cameras (phones/tablets).
 
     Returns:
         str: What will happen next.
     """
     normalized = action.strip().lower()
     if normalized not in _ACTIONS:
-        return f"Unknown action {action!r} — use start, stop, or snap."
+        return f"Unknown action {action!r} — use start, stop, snap, or flip."
     if normalized == "start":
         return (
             "Camera start requested. Live frames will begin arriving as image "
@@ -38,4 +39,6 @@ def control_camera(action: str) -> str:
         )
     if normalized == "snap":
         return "Snap requested — a full-quality frame is being captured and sent now."
+    if normalized == "flip":
+        return "Camera flip requested — switching between front and rear cameras; frames continue."
     return "Camera stop requested — frames will cease."

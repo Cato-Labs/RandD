@@ -21,17 +21,18 @@ export class CameraCapture {
     return this.stream;
   }
 
-  async start(deviceId?: string): Promise<void> {
+  async start(deviceId?: string, facing: "environment" | "user" = "environment"): Promise<void> {
     // Constraint fallback chain so a camera is found on every device class:
-    // 1. explicit device pick  2. rear camera (phones/tablets in the field)
-    // 3. front camera (FaceTime on macOS/iOS, front-facing on Android)
-    // 4. any available camera
+    // 1. explicit device pick  2. preferred facing (rear by default; flipped
+    // on request)  3. the other facing (FaceTime on macOS/iOS, front on
+    // Android)  4. any available camera
     const quality = { height: { ideal: 1080 }, width: { ideal: 1920 } };
+    const other = facing === "environment" ? "user" : "environment";
     const attempts: MediaTrackConstraints[] = deviceId
       ? [{ deviceId: { exact: deviceId }, ...quality }]
       : [
-          { facingMode: "environment", ...quality },
-          { facingMode: "user", ...quality },
+          { facingMode: facing, ...quality },
+          { facingMode: other, ...quality },
           { ...quality },
         ];
     let lastError: unknown;
