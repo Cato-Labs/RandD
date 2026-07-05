@@ -610,7 +610,9 @@ export const useLiveAgent = () => {
     setRecording(true);
     try {
       const clamped = Math.max(2, Math.min(durationSec || 10, 120));
-      const blob = await camera.record(clamped * 1000);
+      // Reuse the live session mic track — a second getUserMedia while
+      // MicCapture holds the mic records silence on iOS Safari/some Androids.
+      const blob = await camera.record(clamped * 1000, micRef.current?.mediaStream);
       const query = `section=${encodeURIComponent(section)}&duration=${clamped}`;
       await fetch(`/api/inspection/video?${query}`, {
         method: "POST",

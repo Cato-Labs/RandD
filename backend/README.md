@@ -1,8 +1,10 @@
 # RandD Live Backend
 
+Requires **Python 3.12+** (the Nova Sonic bidi provider refuses to import on older interpreters).
+
 ```bash
 cd backend
-python3 -m venv .backend-venv
+python3.12 -m venv .backend-venv
 . .backend-venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then fill in real credentials — .env is gitignored, never commit it

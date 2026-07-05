@@ -235,9 +235,10 @@ async def websocket_endpoint(
         )
         await websocket.close()
         return
-    agent = create_agent(mode=mode, voice=voice, provider=provider)
-
     try:
+        # Inside the try so construction failures (missing credentials, model
+        # deps) reach the browser as bidi_error instead of a dead socket.
+        agent = create_agent(mode=mode, voice=voice, provider=provider)
         await agent.run(
             inputs=[BidiWebSocketInput(websocket)],
             outputs=[BidiWebSocketOutput(websocket)],

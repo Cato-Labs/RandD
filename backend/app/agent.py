@@ -31,16 +31,15 @@ DEFAULT_PROVIDER = "openai"
 
 # The three vended bidi providers (strands-py/src/strands/experimental/bidi/models).
 # Each entry drives the frontend model picker and the per-provider voice list.
-# "enabled" gates the picker and /ws — Gemini is off until a funded AI Studio
-# key or Vertex allowlisting exists (1011/1008 as of 2026-07-03).
+# "enabled" gates the picker and /ws.
 PROVIDERS: dict[str, dict[str, Any]] = {
     "gemini": {
         "name": "Gemini Live",
         "vendor": "Google",
         "model_id": os.getenv("GEMINI_LIVE_MODEL", DEFAULT_MODEL_ID),
         "default_voice": "Puck",
-        "description": "Native multimodal realtime — disabled pending billing.",
-        "enabled": False,
+        "description": "Native multimodal realtime (gemini-3.1-flash-live-preview).",
+        "enabled": True,
     },
     "openai": {
         "name": "GPT-Realtime-2",

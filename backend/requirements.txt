@@ -6,5 +6,8 @@ strands-fun-tools[clipboard,chess,display,template,utility,dialog,ui]>=0.4.0,<1.
 strands-google>=0.1.0,<1.0.0
 google-genai>=2.10.0,<3.0.0
 boto3>=1.34.0,<2.0.0
+# Nova Sonic bidi streaming (BidiNovaSonicModel) — the experimental smithy SDK
+# it imports (aws_sdk_bedrock_runtime). Requires Python 3.12+.
+aws-sdk-bedrock-runtime>=0.1.0,<1.0.0
 python-dotenv>=1.0.0,<2.0.0
 imageio-ffmpeg>=0.5.0,<1.0.0
