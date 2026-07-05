@@ -76,22 +76,33 @@ export class CameraCapture {
 
   /**
    * Record a full-motion clip WITH microphone audio (MediaRecorder).
-   * Grabs a fresh mic track for narration (released afterwards); degrades to
-   * video-only when the mic is unavailable. Returns a playable webm blob.
+   *
+   * Prefers the ALREADY-LIVE session mic track (`liveMic`) — during a voice
+   * session the mic is held by MicCapture, and opening a second capture
+   * returns a silent/dead track on iOS Safari and some Android builds (the
+   * root cause of soundless walkthrough clips). A track can feed multiple
+   * consumers, so recording taps it without disturbing the agent audio.
+   * Falls back to a fresh mic grab (released afterwards) outside sessions,
+   * and degrades to video-only when no mic is available at all.
    */
-  async record(durationMs: number): Promise<Blob> {
+  async record(durationMs: number, liveMic?: MediaStream | null): Promise<Blob> {
     if (!this.stream) throw new Error("camera not started");
+    const liveTracks = (liveMic?.getAudioTracks() ?? []).filter(
+      (track) => track.readyState === "live"
+    );
     let mic: MediaStream | null = null;
-    try {
-      mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-    } catch {
-      // no mic permission — record video-only rather than failing
+    if (liveTracks.length === 0) {
+      try {
+        mic = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+      } catch {
+        // no mic permission — record video-only rather than failing
+      }
     }
     const combined = new MediaStream([
       ...this.stream.getVideoTracks(),
-      ...(mic?.getAudioTracks() ?? []),
+      ...(liveTracks.length > 0 ? liveTracks : mic?.getAudioTracks() ?? []),
     ]);
     const mimeType = [
       "video/webm;codecs=vp9,opus",

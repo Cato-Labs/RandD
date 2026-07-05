@@ -75,6 +75,11 @@ export class MicCapture {
     return this.stream !== null;
   }
 
+  /** The live mic stream, so recorders can reuse the already-granted track. */
+  get mediaStream(): MediaStream | null {
+    return this.stream;
+  }
+
   async start(deviceId?: string): Promise<void> {
     await this.stop();
     this.stream = await navigator.mediaDevices.getUserMedia({
