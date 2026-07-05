@@ -140,24 +140,30 @@ def take_photo(
 @tool
 def take_video(
     duration: float = 10.0,
+    section: str = None,
     save_path: str = None,
     discover: bool = False,
 ) -> Dict[str, Any]:
-    """Record a video clip from the inspector's device camera.
+    """Record a video clip WITH AUDIO from the inspector's device camera.
 
-    Collects the live browser camera stream for ``duration`` seconds and
-    assembles an mp4 (frame rate matches the stream cadence — a walkthrough
-    timelapse, not full-motion video). Falls back to any server-attached
-    camera for full-motion capture. Start the device camera first with
-    control_camera("start").
+    The inspector's browser records the camera stream plus microphone audio
+    (MediaRecorder), uploads the clip, and its speech is transcribed — the
+    transcript comes back in this tool's result so you can fold what the
+    inspector SAID together with what you SAW into the section note
+    (record_section_note). Start the device camera first with
+    control_camera("start"). Falls back to a silent server-side timelapse
+    when the browser can't record.
 
     Args:
-        duration: Seconds of stream to record (2-120)
-        save_path: Directory to save the video (defaults to current directory)
+        duration: Seconds to record (2-120)
+        section: Checklist section this walkthrough belongs to (e.g. "Hot Tub",
+            "HouseKeeping", "Utilities", "Gifts") — the clip is embedded in that
+            section of the inspection form (one video slot per section)
+        save_path: Directory for the fallback timelapse (defaults to current directory)
         discover: If True, report which capture sources are available
 
     Returns:
-        Dict with status and content (file path, fps, frame count)
+        Dict with status and content (file path, audio transcript)
     """
     try:
         if discover:
@@ -166,10 +172,30 @@ def take_video(
         directory = _save_dir(save_path)
         duration = max(2.0, min(float(duration), 120.0))
 
-        # 1) Device camera via browser stream
+        # 1) Device camera via browser MediaRecorder (full motion + mic audio).
+        #    The frontend sees this tool call stream in, records, and uploads;
+        #    we block on the clip mailbox until it lands (or time out).
         if browser_camera.stream_active():
-            start_ts = time.time()
-            time.sleep(duration)
+            browser_camera.arm_clip_capture()
+            clip = browser_camera.wait_for_clip(duration + 45.0)
+            if clip:
+                transcript = clip.get("transcript")
+                spoken = (
+                    f'\n\U0001f5e3\ufe0f Inspector said: "{transcript}"'
+                    if transcript
+                    else "\n(no speech detected in the audio track)"
+                )
+                section_note = f" for section '{clip.get('section') or section}'" if (clip.get("section") or section) else ""
+                return {
+                    "status": "success",
+                    "content": [{
+                        "text": f"\U0001f3a5 Recorded {duration:.0f}s walkthrough with audio{section_note} "
+                                f"\u2192 `{clip['path']}` ({clip.get('size', 0):,} bytes).{spoken}"
+                    }],
+                }
+            # Mailbox timed out — fall through to the silent frame-stitch path
+            # using whatever streamed during the wait window.
+            start_ts = time.time() - duration
             frames = browser_camera.frames_since(start_ts)
             if len(frames) >= 2:
                 import cv2
@@ -183,19 +209,21 @@ def take_video(
                 if len(decoded) >= 2:
                     h, w = decoded[0].shape[:2]
                     fps = max(0.5, len(decoded) / duration)
-                    filepath = directory / f"video-{int(start_ts)}-device-{int(duration)}s.mp4"
-                    writer = cv2.VideoWriter(
-                        str(filepath), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)
+                    from app.take_video import open_playable_writer
+
+                    writer, filepath = open_playable_writer(
+                        directory, f"video-{int(start_ts)}-device-{int(duration)}s", fps, (w, h)
                     )
                     for img in decoded:
                         if img.shape[:2] != (h, w):
                             img = cv2.resize(img, (w, h))
                         writer.write(img)
                     writer.release()
+                    section_note = f" for section '{section}'" if section else ""
                     return {
                         "status": "success",
                         "content": [{
-                            "text": f"🎥 Recorded {len(decoded)} frames over {duration:.0f}s from the device camera "
+                            "text": f"🎥 Recorded {len(decoded)} frames over {duration:.0f}s from the device camera{section_note} "
                                     f"({fps:.1f} fps timelapse) → `{filepath}` "
                                     f"({os.path.getsize(filepath):,} bytes)"
                         }],

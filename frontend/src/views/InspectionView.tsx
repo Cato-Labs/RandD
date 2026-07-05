@@ -10,15 +10,24 @@ import type { LiveToolPart } from "@/lib/live-types";
  * the agent's journal + camera tool results into it as they stream:
  *
  *  - journal / record_checklist_result  -> setChecked + setNote (by item slug)
+ *  - record_section_note                -> setSectionNote (by section slug)
  *  - take_photo / capture_photo         -> addPhoto (workspace file URL)
+ *  - take_video                         -> setSectionVideo (workspace file URL)
+ *
+ * It also continuously snapshots the form as a self-contained interactive
+ * HTML file (POST /api/inspection/export) so the agent can ship the live
+ * form itself to Slack.
  */
 
 type QcInspectionApi = {
   addPhoto: (id: string, src: string, tag?: string) => boolean;
+  setSectionVideo: (id: string, src: string) => boolean;
+  setSectionNote: (id: string, text: string) => boolean;
   setNote: (id: string, text: string) => boolean;
   setChecked: (id: string, checked: boolean) => boolean;
   listItems: () => string[];
   getState: () => unknown;
+  exportHtml: () => Promise<string>;
 };
 
 /** Same slug rule as inspection.html builds its data-ids with. */
@@ -49,6 +58,19 @@ const extractImagePaths = (value: unknown, found: string[] = []): string[] => {
   return found;
 };
 
+/** Pull video paths out of arbitrary tool output (take_video returns file paths). */
+const extractVideoPaths = (value: unknown, found: string[] = []): string[] => {
+  if (typeof value === "string") {
+    const matches = value.match(/[\w\-./]+\.(?:mp4|webm|mov)/gi);
+    if (matches) found.push(...matches);
+  } else if (Array.isArray(value)) {
+    for (const entry of value) extractVideoPaths(entry, found);
+  } else if (typeof value === "object" && value !== null) {
+    for (const entry of Object.values(value)) extractVideoPaths(entry, found);
+  }
+  return found;
+};
+
 const toWorkspaceUrl = (path: string): string => {
   if (path.startsWith("http") || path.startsWith("data:")) return path;
   const relative = path.replace(/^.*?workspace\//, "").replace(/^\.?\//, "");
@@ -56,8 +78,10 @@ const toWorkspaceUrl = (path: string): string => {
 };
 
 const JOURNAL_TOOLS = new Set(["record_checklist_result", "journal"]);
+const SECTION_NOTE_TOOLS = new Set(["record_section_note"]);
 const ITEM_PHOTO_TOOLS = new Set(["attach_item_photo"]);
 const PHOTO_TOOLS = new Set(["take_photo", "capture_photo"]);
+const VIDEO_TOOLS = new Set(["take_video", "record_video"]);
 
 /** Returns true when the part changed the checklist. */
 const applyToolPart = (
@@ -96,6 +120,14 @@ const applyToolPart = (
     return changed;
   }
 
+  // Overall narrative for a whole section ("what's good, bad, in between").
+  if (SECTION_NOTE_TOOLS.has(part.toolName)) {
+    const section = firstString(input.section, input.section_label, input.area, input.room, label);
+    const note = firstString(input.note, input.notes);
+    if (!section || !note) return false;
+    return api.setSectionNote(slugify(section), note);
+  }
+
   // Pin the just-taken camera frame onto any line item (evidence default),
   // optionally setting the item's narrative note in the same call.
   if (ITEM_PHOTO_TOOLS.has(part.toolName)) {
@@ -117,6 +149,18 @@ const applyToolPart = (
     let changed = false;
     for (const path of extractImagePaths(part.output)) {
       changed = api.addPhoto(slug, toWorkspaceUrl(path), tag) || changed;
+    }
+    return changed;
+  }
+
+  // Section walkthrough clip — one video slot per checklist section.
+  if (VIDEO_TOOLS.has(part.toolName)) {
+    const section = firstString(input.section, input.section_label, input.area, input.room, label);
+    if (!section) return false;
+    const sectionSlug = slugify(section);
+    let changed = false;
+    for (const path of extractVideoPaths(part.output)) {
+      changed = api.setSectionVideo(sectionSlug, toWorkspaceUrl(path)) || changed;
     }
     return changed;
   }
@@ -155,9 +199,13 @@ export const InspectionView = ({
         // Journal edits apply as soon as the call's input is known; photo edits
         // need the tool output (the captured file paths).
         const journalReady =
-          (JOURNAL_TOOLS.has(part.toolName) || ITEM_PHOTO_TOOLS.has(part.toolName)) &&
+          (JOURNAL_TOOLS.has(part.toolName) ||
+            SECTION_NOTE_TOOLS.has(part.toolName) ||
+            ITEM_PHOTO_TOOLS.has(part.toolName)) &&
           (part.state === "input-available" || part.state === "output-available");
-        const photoReady = PHOTO_TOOLS.has(part.toolName) && part.state === "output-available";
+        const photoReady =
+          (PHOTO_TOOLS.has(part.toolName) || VIDEO_TOOLS.has(part.toolName)) &&
+          part.state === "output-available";
         if (!journalReady && !photoReady) continue;
         const key = `${part.toolCallId}:${part.toolName}:${photoReady ? "out" : "in"}`;
         if (appliedRef.current.has(key)) continue;
@@ -172,6 +220,39 @@ export const InspectionView = ({
     // Surface the checklist whenever the agent touched it.
     if (edited) onAgentEditRef.current?.();
   }, [agent.messages, agent.getLatestFrame, ready]);
+
+  // Continuously snapshot the form as a self-contained interactive HTML file
+  // so the agent can upload the form itself to Slack (files_upload_v2).
+  useEffect(() => {
+    if (!ready) return;
+    let lastHash = "";
+    let busy = false;
+    const sync = async () => {
+      if (busy) return;
+      const frame = frameRef.current;
+      const api = (frame?.contentWindow as (Window & { qcInspection?: QcInspectionApi }) | null)
+        ?.qcInspection;
+      if (!api?.exportHtml) return;
+      try {
+        const hash = JSON.stringify(api.getState());
+        if (hash === lastHash) return;
+        busy = true;
+        const html = await api.exportHtml();
+        await fetch("/api/inspection/export", {
+          method: "POST",
+          headers: { "Content-Type": "text/html" },
+          body: html,
+        });
+        lastHash = hash;
+      } catch {
+        // snapshotting must never break the form
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = window.setInterval(sync, 5000);
+    return () => window.clearInterval(timer);
+  }, [ready]);
 
   return (
     <iframe

@@ -11,9 +11,15 @@ from strands_google.use_google import use_google
 
 from app.camera_control import control_camera
 from app.capture_tools import take_photo, take_video
+from app.kb_archive import archive_inspection_report
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
-from app.qc_journal import attach_item_photo, list_checklist_items, record_checklist_result
+from app.qc_journal import (
+    attach_item_photo,
+    list_checklist_items,
+    record_checklist_result,
+    record_section_note,
+)
 from app.tool_libraries import list_library_tools
 from app.vision_tools import yolo_vision
 
@@ -65,6 +71,7 @@ TOOLS = [
     # QC turnover inspection journal (routes to the live checklist form)
     list_checklist_items,
     record_checklist_result,
+    record_section_note,
     attach_item_photo,
     # Inspector's browser camera (frontend executes the start/stop/snap)
     control_camera,
@@ -79,6 +86,8 @@ TOOLS = [
     # Device-camera capture: browser stream first, server hardware fallback
     take_photo,
     take_video,
+    # Archive the latest inspection form into the KB's S3 bucket (memory + artifact)
+    archive_inspection_report,
     # YOLO object detection over the device-camera stream
     yolo_vision,
 ]

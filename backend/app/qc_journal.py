@@ -139,6 +139,28 @@ def record_checklist_result(
 
 
 @tool
+def record_section_note(section: str, note: str) -> str:
+    """Set the overall narrative note for one section of the inspection form.
+
+    Each section (Hot Tub, HouseKeeping, Utilities, Gifts) holds ONE section
+    note next to its walkthrough video — a summary of the area or room in
+    general: what's good, what's bad, and what's in between. Calling again
+    replaces the previous note. Group names (Kitchen, Bathrooms, Bedroom,
+    Home, Outdoors) route to their parent HouseKeeping section.
+
+    Args:
+        section: Section or group name, e.g. "Hot Tub" or "Kitchen".
+        note: The section's narrative note (replaces any prior note).
+
+    Returns:
+        str: Confirmation of what was recorded.
+    """
+    if not note.strip():
+        return "Empty note — nothing recorded."
+    return f"Section note saved for {section.strip()!r}: {note.strip()}"
+
+
+@tool
 def attach_item_photo(item: str, photo_tag: str = "evidence", note: str = "") -> str:
     """Pin the photo you just took onto a specific form line item.
 

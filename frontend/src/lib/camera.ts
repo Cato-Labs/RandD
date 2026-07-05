@@ -74,6 +74,52 @@ export class CameraCapture {
     return dataUrl.slice(dataUrl.indexOf(",") + 1);
   }
 
+  /**
+   * Record a full-motion clip WITH microphone audio (MediaRecorder).
+   * Grabs a fresh mic track for narration (released afterwards); degrades to
+   * video-only when the mic is unavailable. Returns a playable webm blob.
+   */
+  async record(durationMs: number): Promise<Blob> {
+    if (!this.stream) throw new Error("camera not started");
+    let mic: MediaStream | null = null;
+    try {
+      mic = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+    } catch {
+      // no mic permission — record video-only rather than failing
+    }
+    const combined = new MediaStream([
+      ...this.stream.getVideoTracks(),
+      ...(mic?.getAudioTracks() ?? []),
+    ]);
+    const mimeType = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+      "video/mp4",
+    ].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t));
+    const recorder = new MediaRecorder(combined, mimeType ? { mimeType } : undefined);
+    const chunks: BlobPart[] = [];
+    const done = new Promise<Blob>((resolve, reject) => {
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = () =>
+        resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
+      recorder.onerror = () => reject(new Error("recording failed"));
+    });
+    recorder.start();
+    try {
+      await new Promise((r) => setTimeout(r, durationMs));
+    } finally {
+      if (recorder.state !== "inactive") recorder.stop();
+    }
+    const blob = await done;
+    for (const track of mic?.getTracks() ?? []) track.stop();
+    return blob;
+  }
+
   stop(): void {
     if (this.timer !== null) {
       window.clearInterval(this.timer);

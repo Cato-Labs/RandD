@@ -262,6 +262,25 @@ main{max-width:760px;margin:0 auto;padding:40px 20px 96px}
 }
 .photo-card .del:hover{background:rgba(28,27,27,.85)}
 @media (max-width:640px){.gallery-grid{grid-template-columns:repeat(2,1fr)}}
+
+/* section walkthrough video */
+.video-block{padding:18px 32px 2px}
+.video-block .label-caps{color:var(--on-surface-variant);margin-bottom:8px}
+.video-card{position:relative;border-radius:var(--r-md);overflow:hidden;background:#000;box-shadow:0 2px 8px var(--shadow-tint);animation:reveal .3s ease}
+.video-card video{width:100%;max-height:340px;display:block;background:#000}
+.video-card .cap{
+  position:absolute;top:0;left:0;right:0;padding:7px 10px 14px;
+  background:linear-gradient(rgba(28,27,27,.65),transparent);
+  color:rgba(255,255,255,.85);font-size:10.5px;font-weight:600;letter-spacing:.03em;
+  pointer-events:none;
+}
+.video-card .del{
+  position:absolute;top:6px;right:6px;width:24px;height:24px;
+  border:none;border-radius:50%;cursor:pointer;
+  background:rgba(28,27,27,.6);color:#fff;font-size:13px;line-height:1;
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:1;
+}
+.video-card .del:hover{background:rgba(28,27,27,.85)}
 .note-area{
   width:100%;min-height:76px;resize:vertical;
   padding:12px 14px;border-radius:var(--r-md);
@@ -310,7 +329,7 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
 @media (max-width:640px){
   .ph-title{font-size:34px}
   .ph-inner{padding:40px 20px 32px}
-  .section-head,.section-sub,.group-label{padding-left:20px;padding-right:20px}
+  .section-head,.section-sub,.group-label,.video-block{padding-left:20px;padding-right:20px}
   .items{padding:8px 8px 16px}
   .item-detail{margin-left:16px;margin-right:8px}
   .repairs-hint,.repairs-body{padding-left:20px;padding-right:20px}
@@ -496,6 +515,7 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
   const CAMERA_ICON = '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>';
   const NOTE_ICON   = '<svg viewBox="0 0 24 24"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5z"/></svg>';
   const PHOTO_DROP  = '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="14" r="3.5"/></svg>';
+  const VIDEO_ICON  = '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5 21 7v10l-5-3.5"/></svg>';
 
   const items = document.querySelectorAll('[data-item]');
   const sections = document.querySelectorAll('[data-section]');
@@ -522,6 +542,80 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
       if(ch !== head) inner.appendChild(ch);
     });
     card.appendChild(body);
+
+    // One walkthrough video slot per checklist section
+    if(card.hasAttribute('data-section')){
+      const title = card.querySelector('.section-title').textContent.trim();
+      card.dataset.id = title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+
+      const vblock = document.createElement('div');
+      vblock.className = 'video-block';
+      vblock.innerHTML =
+        '<div class="label-caps">Section walkthrough</div>' +
+        '<div class="video-slot"></div>' +
+        '<div class="photo-drop" tabindex="0" role="button" aria-label="Add a walkthrough video">' + VIDEO_ICON +
+        '<span>Tap to add a walkthrough video</span></div>' +
+        '<input type="file" accept="video/*" capture="environment" hidden>' +
+        '<div class="label-caps" style="margin-top:14px">Section note</div>' +
+        '<textarea class="note-area section-note" placeholder="How is this area overall? What\u2019s good, what\u2019s bad, what\u2019s in between\u2026"></textarea>';
+      inner.insertBefore(vblock, inner.firstChild);
+
+      const slot = vblock.querySelector('.video-slot');
+      const vdrop = vblock.querySelector('.photo-drop');
+      const vinput = vblock.querySelector('input[type=file]');
+      const sectionNote = vblock.querySelector('.section-note');
+      let video = null; // {src, ts, source, objectUrl}
+
+      function renderVideo(){
+        if(video){
+          slot.innerHTML =
+            '<div class="video-card">' +
+              '<div class="cap">' + (video.source === 'agent' ? 'Ron · ' : '') +
+                video.ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) + '</div>' +
+              '<button class="del" type="button" aria-label="Remove video">&times;</button>' +
+              '<video controls playsinline preload="metadata"></video>' +
+            '</div>';
+          slot.querySelector('video').src = video.src;
+          vdrop.style.display = 'none';
+          slot.querySelector('.del').onclick = function(){
+            if(video && video.objectUrl) URL.revokeObjectURL(video.objectUrl);
+            video = null; card._video = null; renderVideo();
+          };
+        } else {
+          slot.innerHTML = '';
+          vdrop.style.display = '';
+        }
+      }
+      function setVideo(src, source, objectUrl){
+        if(video && video.objectUrl) URL.revokeObjectURL(video.objectUrl);
+        video = { src: src, ts: new Date(), source: source || 'user', objectUrl: objectUrl || null };
+        card._video = video;
+        if(!card.classList.contains('open')){
+          card.classList.add('open');
+          head.setAttribute('aria-expanded','true');
+        }
+        renderVideo();
+      }
+      card._setVideo = setVideo;
+      card._setSectionNote = function(text){
+        sectionNote.value = text;
+        if(!card.classList.contains('open')){
+          card.classList.add('open');
+          head.setAttribute('aria-expanded','true');
+        }
+      };
+      card._getSectionNote = function(){ return sectionNote.value; };
+
+      vdrop.addEventListener('click', function(){ vinput.click(); });
+      vdrop.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){e.preventDefault();vinput.click();} });
+      vinput.addEventListener('change', function(){
+        const f = vinput.files && vinput.files[0];
+        if(!f) return;
+        const url = URL.createObjectURL(f);
+        setVideo(url, 'user', url);
+        vinput.value = '';
+      });
+    }
 
     // Right cluster: count badge + chevron
     const right = document.createElement('span'); right.className = 'head-right';
@@ -589,7 +683,7 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
       '<div class="compare-grid" style="display:none"></div>' +
       '<div class="gallery-grid" style="display:none"></div>' +
       '<div class="photo-drop" tabindex="0" role="button" aria-label="Add a photo">' + PHOTO_DROP +
-      '<span>Tap to add a photo</span></div>' +
+      '<span>Tap to add a photo · up to 3 evidence shots</span></div>' +
       '<input type="file" accept="image/*" capture="environment" hidden>';
 
     const noteBlock = document.createElement('div');
@@ -669,6 +763,13 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
         if(i > -1) photos.splice(i,1);
       }
       photos.push({ id: ++pid, src: src, tag: tag, ts: new Date(), source: source || 'user' });
+      // three evidence images max per line item — oldest rotates out
+      if(tag === 'evidence'){
+        while(photos.filter(function(p){ return p.tag === 'evidence'; }).length > 3){
+          const oldest = photos.find(function(p){ return p.tag === 'evidence'; });
+          photos.splice(photos.indexOf(oldest), 1);
+        }
+      }
       openSection(item);
       detail.classList.add('open');
       renderPhotos();
@@ -784,6 +885,17 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
   function findItem(id){
     return document.querySelector('[data-item][data-id="' + id + '"]');
   }
+  function findSection(id){
+    const card = document.querySelector('[data-section][data-id="' + id + '"]');
+    if(card) return card;
+    // fall back: a group label (e.g. "kitchen") maps to its parent section
+    const groups = document.querySelectorAll('[data-section] .group-label');
+    for(let i = 0; i < groups.length; i++){
+      const gslug = groups[i].textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      if(gslug === id) return groups[i].closest('[data-section]');
+    }
+    return null;
+  }
   window.qcInspection = {
     addPhoto: function(id, src, tag){
       const el = findItem(id);
@@ -808,8 +920,23 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
       if(isChecked !== !!checked) circle.click();
       return true;
     },
+    setSectionVideo: function(id, src){
+      const card = findSection(id);
+      if(card && card._setVideo){ card._setVideo(src, 'agent'); return true; }
+      return false;
+    },
+    setSectionNote: function(id, text){
+      const card = findSection(id);
+      if(card && card._setSectionNote){ card._setSectionNote(text); return true; }
+      return false;
+    },
     listItems: function(){
       return Array.prototype.map.call(items, function(el){
+        return el.dataset.id;
+      });
+    },
+    listSections: function(){
+      return Array.prototype.map.call(document.querySelectorAll('[data-section]'), function(el){
         return el.dataset.id;
       });
     },
@@ -818,6 +945,15 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
         property: 'LBV',
         signedOff: signed,
         repairs: document.getElementById('repairsNote').value,
+        temp: (document.querySelector('.temp-input') || {}).value || '',
+        sections: Array.prototype.map.call(document.querySelectorAll('[data-section]'), function(el){
+          const v = el._video;
+          return {
+            id: el.dataset.id,
+            note: el._getSectionNote ? el._getSectionNote() : '',
+            video: v ? { src: v.src, source: v.source, ts: v.ts.toISOString() } : null
+          };
+        }),
         items: Array.prototype.map.call(items, function(el){
           return {
             id: el.dataset.id,
@@ -830,8 +966,62 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
           };
         })
       };
+    },
+    /* Self-contained interactive export: the form's own pristine source with
+       the live state baked in as window.__QC_STATE__ and every photo/video
+       inlined as a data URL. Opening the file anywhere — including straight
+       from a Slack download — rehydrates a fully working copy of the form. */
+    exportHtml: async function(){
+      async function toDataUrl(src){
+        if(!src || src.indexOf('data:') === 0) return src;
+        try{
+          const blob = await (await fetch(src)).blob();
+          return await new Promise(function(resolve, reject){
+            const r = new FileReader();
+            r.onload = function(){ resolve(r.result); };
+            r.onerror = reject;
+            r.readAsDataURL(blob);
+          });
+        }catch(e){ return src; }
+      }
+      const state = window.qcInspection.getState();
+      for(const it of state.items){
+        for(const p of it.photos) p.src = await toDataUrl(p.src);
+      }
+      for(const s of state.sections){
+        if(s.video) s.video.src = await toDataUrl(s.video.src);
+      }
+      let source = await (await fetch(location.pathname)).text();
+      // drop any previous baked-in state so re-exports stay clean
+      source = source.replace(/<script>window\.__QC_STATE__[\s\S]*?<\/script>\n?/, '');
+      const boot = '<script>window.__QC_STATE__ = ' +
+        JSON.stringify(state).replace(/<\/script/gi, '<\\/script') + ';<\/script>';
+      return source.replace('<script>', boot + '\n<script>');
     }
   };
+
+  /* Rehydrate a self-contained export (state baked in by exportHtml) */
+  (function(){
+    const boot = window.__QC_STATE__;
+    if(!boot) return;
+    (boot.items || []).forEach(function(s){
+      const el = findItem(s.id);
+      if(!el) return;
+      (s.photos || []).forEach(function(p){ el._addPhoto(p.src, p.tag, p.source); });
+      if(s.note) window.qcInspection.setNote(s.id, s.note);
+      if(s.checked) window.qcInspection.setChecked(s.id, true);
+    });
+    (boot.sections || []).forEach(function(s){
+      const card = findSection(s.id);
+      if(!card) return;
+      if(s.video && card._setVideo) card._setVideo(s.video.src, s.video.source);
+      if(s.note && card._setSectionNote) card._setSectionNote(s.note);
+    });
+    if(boot.repairs) document.getElementById('repairsNote').value = boot.repairs;
+    if(boot.temp){ const t = document.querySelector('.temp-input'); if(t) t.value = boot.temp; }
+    update();
+    if(boot.signedOff && !btnReady.disabled) btnReady.click();
+  })();
 })();
 </script>
 </body>

@@ -4,15 +4,18 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from strands_tools import editor, environment, http_request, load_tool, mcp_client, shell
 
 from app.agent import DEFAULT_MODEL_ID, DEFAULT_PROVIDER, PROVIDERS, create_agent
+from app import browser_camera
 from app.io import BidiWebSocketInput, BidiWebSocketOutput
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
+from app.transcribe import transcribe_audio
 
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
@@ -29,6 +32,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.mount("/workspace", StaticFiles(directory=WORKSPACE_DIR), name="workspace")
+
+REPORTS_DIR = WORKSPACE_DIR / "reports"
+LATEST_REPORT = REPORTS_DIR / "inspection-report-latest.html"
+CAPTURES_DIR = WORKSPACE_DIR / "captures"
+
+
+@app.post("/api/inspection/video")
+async def inspection_video(
+    request: Request,
+    section: str = Query(default=""),
+    duration: float = Query(default=0.0),
+) -> dict[str, Any]:
+    """Receive a browser-recorded walkthrough clip (webm with mic audio).
+
+    The frontend records with MediaRecorder when the agent calls take_video,
+    then uploads the blob here. We save it, transcribe the audio (so the agent
+    can fold speech + visuals into the section note), and wake the take_video
+    tool that is blocking on the clip mailbox.
+    """
+    data = await request.body()
+    if not data:
+        return {"error": "empty body"}
+    CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+    import re as _re
+    import time as _time
+
+    # iOS Safari records video/mp4; Chrome/Android record video/webm.
+    mime = (request.headers.get("content-type") or "video/webm").split(";")[0].strip()
+    ext = ".mp4" if "mp4" in mime else ".webm"
+    slug = _re.sub(r"[^a-zA-Z0-9-]+", "-", section).strip("-").lower() or "walkthrough"
+    filename = f"video-{int(_time.time())}-{slug}{ext}"
+    path = CAPTURES_DIR / filename
+    path.write_bytes(data)
+
+    transcript = await run_in_threadpool(transcribe_audio, path, mime)
+    info = {
+        "path": str(path),
+        "url": f"/workspace/captures/{filename}",
+        "section": section,
+        "duration": duration,
+        "size": len(data),
+        "transcript": transcript,
+    }
+    browser_camera.deliver_clip(info)
+    return info
+
+
+@app.post("/api/inspection/export")
+async def inspection_export(request: Request) -> dict[str, str]:
+    """Receive the self-contained interactive inspection-form snapshot.
+
+    The frontend posts the full HTML export (state + media baked in) whenever
+    the form changes; the agent ships the latest file to Slack via
+    files_upload_v2. Signed-off snapshots are additionally archived into the
+    knowledge-base S3 bucket (best-effort) so past inspections become
+    searchable memory.
+    """
+    html = (await request.body()).decode("utf-8", errors="replace")
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    LATEST_REPORT.write_text(html, encoding="utf-8")
+    result = {"path": str(LATEST_REPORT), "url": "/workspace/reports/inspection-report-latest.html"}
+    try:
+        from app.kb_archive import archive_report, extract_state
+
+        state = extract_state(html)
+        if state and state.get("signedOff") and os.getenv("BEDROCK_KB_S3_BUCKET"):
+            archived = await run_in_threadpool(archive_report, html, "auto-archived on sign-off")
+            result["archived"] = archived["summary_uri"]
+    except Exception:
+        pass  # archiving must never break the export path
+    return result
+
 
 VOICES: dict[str, list[dict[str, str]]] = {
     "gemini": [

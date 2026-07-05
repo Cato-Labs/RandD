@@ -63,6 +63,7 @@ export const useLiveAgent = () => {
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraDeviceId, setCameraDeviceId] = useState<string | undefined>();
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [recording, setRecording] = useState(false);
   const [agentCard, setAgentCard] = useState<AgentCard | null>(null);
   const [voices, setVoices] = useState<LiveVoice[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +78,7 @@ export const useLiveAgent = () => {
     stop: () => void;
     snap: () => boolean;
     flip: () => Promise<void>;
+    record: (durationSec: number, section: string) => Promise<boolean>;
   } | null>(null);
   const handledCameraCallsRef = useRef<Set<string>>(new Set());
   const playerRef = useRef<PcmPlayer | null>(null);
@@ -344,6 +346,19 @@ export const useLiveAgent = () => {
               if (action === "flip") void camera?.flip();
             }
           }
+          // take_video: record camera + mic in the browser, upload, let the
+          // blocking backend tool pick up the clip (with transcript).
+          if (toolUse.name === "take_video") {
+            const key = `${toolUse.toolUseId}:record`;
+            if (!handledCameraCallsRef.current.has(key)) {
+              handledCameraCallsRef.current.add(key);
+              const input = (toolUse.input ?? {}) as { duration?: number; section?: string };
+              void cameraControlRef.current?.record(
+                Number(input.duration ?? 10),
+                String(input.section ?? "")
+              );
+            }
+          }
           upsertToolPart({
             type: `tool-${toolUse.name}`,
             toolCallId: toolUse.toolUseId,
@@ -588,6 +603,28 @@ export const useLiveAgent = () => {
   /** Latest camera frame (base64 JPEG) — used to pin photos onto checklist items. */
   const getLatestFrame = useCallback(() => lastFrameRef.current, []);
 
+  /** Record a walkthrough clip (video + mic audio) and upload it for the take_video tool. */
+  const recordClip = useCallback(async (durationSec: number, section: string) => {
+    const camera = cameraRef.current;
+    if (!camera) return false;
+    setRecording(true);
+    try {
+      const clamped = Math.max(2, Math.min(durationSec || 10, 120));
+      const blob = await camera.record(clamped * 1000);
+      const query = `section=${encodeURIComponent(section)}&duration=${clamped}`;
+      await fetch(`/api/inspection/video?${query}`, {
+        method: "POST",
+        headers: { "Content-Type": blob.type || "video/webm" },
+        body: blob,
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setRecording(false);
+    }
+  }, []);
+
   // Let the agent's control_camera tool drive the browser camera.
   useEffect(() => {
     cameraControlRef.current = {
@@ -595,8 +632,9 @@ export const useLiveAgent = () => {
       stop: stopCamera,
       snap: snapPhoto,
       flip: flipCamera,
+      record: recordClip,
     };
-  }, [startCamera, stopCamera, snapPhoto, flipCamera]);
+  }, [startCamera, stopCamera, snapPhoto, flipCamera, recordClip]);
 
   const selectMicDevice = useCallback(
     async (deviceId: string) => {
@@ -684,6 +722,7 @@ export const useLiveAgent = () => {
     cameraActive,
     cameraDeviceId,
     cameraStream,
+    recording,
     startCamera,
     stopCamera,
     selectCameraDevice,

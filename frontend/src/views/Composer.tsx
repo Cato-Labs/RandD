@@ -74,13 +74,21 @@ const CameraPreview = ({ agent }: { agent: LiveAgent }) => {
   if (!agent.cameraStream) return null;
   return (
     <div className="mx-auto mb-2 w-full max-w-3xl">
-      <video
-        autoPlay
-        className="ml-auto h-28 rounded-md border object-cover"
-        muted
-        playsInline
-        ref={videoRef}
-      />
+      <div className="relative ml-auto w-fit">
+        <video
+          autoPlay
+          className="h-28 rounded-md border object-cover"
+          muted
+          playsInline
+          ref={videoRef}
+        />
+        {agent.recording ? (
+          <span className="absolute top-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 font-semibold text-[10px] text-white tracking-wide backdrop-blur-sm">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+            REC
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 };

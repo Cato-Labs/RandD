@@ -20,6 +20,27 @@ import cv2
 
 from strands import tool
 
+# Codecs browsers can actually decode, tried in order. avc1 (H.264 in .mp4)
+# streams everywhere; VP80 (.webm) covers OpenCV builds without an H.264
+# encoder; mp4v is a last resort (downloadable, but most browsers won't
+# play it inline in a <video> tag).
+_PLAYABLE_CODECS = (("avc1", ".mp4"), ("VP80", ".webm"), ("mp4v", ".mp4"))
+
+
+def open_playable_writer(save_dir, stem: str, fps: float, size):
+    """Open a cv2.VideoWriter using the first browser-playable codec available.
+
+    Returns (writer, filepath). Raises RuntimeError when no codec works.
+    """
+    for fourcc, ext in _PLAYABLE_CODECS:
+        filepath = Path(save_dir) / f"{stem}{ext}"
+        writer = cv2.VideoWriter(str(filepath), cv2.VideoWriter_fourcc(*fourcc), fps, size)
+        if writer.isOpened():
+            return writer, filepath
+        writer.release()
+        filepath.unlink(missing_ok=True)
+    raise RuntimeError("No usable video codec available")
+
 
 def _discover_cameras(max_check: int = 10) -> List[int]:
     """Discover all available cameras by checking indices."""
@@ -62,14 +83,12 @@ def _record_from_camera(
 
         height, width = frame.shape[:2]
 
-        # Save video with meaningful filename
+        # Save video with meaningful filename, using a codec browsers can play
         timestamp = int(time.time())
-        filename = f"video-{timestamp}-cam{camera_id}-{int(duration)}s.mp4"
-        filepath = save_dir / filename
-
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(filepath), fourcc, fps, (width, height))
-        if not writer.isOpened():
+        stem = f"video-{timestamp}-cam{camera_id}-{int(duration)}s"
+        try:
+            writer, filepath = open_playable_writer(save_dir, stem, fps, (width, height))
+        except RuntimeError:
             cam.release()
             return {
                 "camera_id": camera_id,
