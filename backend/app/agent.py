@@ -15,6 +15,8 @@ from app.gmail_attachments import gmail_send_with_attachments
 from app.kb_archive import archive_inspection_report, save_site_memory
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
+from app.slack_report import send_report_to_slack
+from app.walkthrough_videos import list_walkthrough_videos, send_video_to_slack
 from app.qc_journal import (
     attach_item_photo,
     list_checklist_items,
@@ -29,6 +31,14 @@ from app.vision_tools import yolo_vision
 DEFAULT_MODEL_ID = "gemini-3.1-flash-live-preview"
 
 DEFAULT_PROVIDER = "openai"
+
+# The inspector's input device is ALWAYS the browser microphone, which streams
+# PCM16 at this rate (frontend MIC_SAMPLE_RATE in use-live-agent.ts). Every bidi
+# model must be told this is the input rate so it decodes the samples correctly.
+# Gemini/Nova already default to 16 kHz; OpenAI Realtime defaults to 24 kHz and
+# ignores the per-chunk sample_rate, so without this it misreads the mic (audio
+# sounds sped-up/garbled to the model) and comprehension/tool-use degrades.
+BROWSER_MIC_RATE = 16000
 
 # The three vended bidi providers (strands-py/src/strands/experimental/bidi/models).
 # Each entry drives the frontend model picker and the per-provider voice list.
@@ -78,6 +88,8 @@ TOOLS = [
     # Slack delivery (Addendum 1): reports via files_upload_v2, notes via messages
     slack,
     slack_send_message,
+    # Reliable inspection-form delivery (resolves the path itself; preferred)
+    send_report_to_slack,
     # Google Workspace (strands-google): 200+ APIs via service account / OAuth
     use_google,
     google_auth,
@@ -87,6 +99,9 @@ TOOLS = [
     # Device-camera capture: browser stream first, server hardware fallback
     take_photo,
     take_video,
+    # Access recorded walkthrough clips after the fact (list + deliver)
+    list_walkthrough_videos,
+    send_video_to_slack,
     # Archive the latest inspection form into the KB's S3 bucket (memory + artifact)
     archive_inspection_report,
     # Per-house site memories that don't come from inspections
@@ -101,7 +116,10 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
     if provider not in PROVIDERS:
         raise ValueError(f"Unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
 
-    provider_config: dict[str, Any] = {"audio": {"voice": voice}}
+    # input_rate matches the browser mic (16 kHz) for every provider; output_rate
+    # is left at each model's native rate — the frontend plays back at whatever
+    # sample_rate the model stamps on bidi_audio_stream (use-live-agent.ts).
+    provider_config: dict[str, Any] = {"audio": {"voice": voice, "input_rate": BROWSER_MIC_RATE}}
 
     if provider == "gemini":
         from strands.experimental.bidi.models.gemini_live import BidiGeminiLiveModel
