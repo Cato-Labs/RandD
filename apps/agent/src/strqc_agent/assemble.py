@@ -19,7 +19,6 @@ from .tools import ALL_TOOLS
 from .tools.camera import CaptureBackend, FileCaptureBackend, set_capture_backend
 from .tools.slack_delivery import DeliveryAdapter, make_delivery_adapter, set_delivery_adapter
 
-
 PROVIDERS = ("gemini", "openai", "nova")
 
 
@@ -37,7 +36,7 @@ def build_model(provider: str | None = None, provider_config: dict | None = None
         from strands.experimental.bidi.models.gemini_live import BidiGeminiLiveModel
 
         client_config = {"api_key": settings.google_api_key} if settings.google_api_key else None
-        
+
         real_provider_config = (provider_config or {}).copy()
         real_provider_config["inference"] = real_provider_config.get("inference", {}).copy()
         if settings.strqc_gemini_thinking_level:

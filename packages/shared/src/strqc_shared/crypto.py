@@ -65,7 +65,7 @@ def decrypt_secret(token: str, master_key_b64: str, *, aad: str = "") -> str:
 
 
 def mask_secret(value: str | None) -> str:
-    """Displayable mask — used by API/UI; never reveals length beyond a hint."""
+    """Displayable mask — used by API/UI; reveals neither length nor content."""
     if not value:
         return ""
-    return "••••" + value[-1] if len(value) > 4 else "••••"
+    return "••••"

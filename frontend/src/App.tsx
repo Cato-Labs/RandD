@@ -12,11 +12,9 @@ import { ChatThread } from "@/views/ChatThread";
 import { Composer } from "@/views/Composer";
 import { InspectionView } from "@/views/InspectionView";
 import { VoiceDock } from "@/views/VoiceDock";
-import { WorkflowView } from "@/views/WorkflowView";
 
 const App = () => {
   const agent = useLiveAgent();
-  const [workflowOpen, setWorkflowOpen] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [inspectionOpen, setInspectionOpen] = useState(false);
 
@@ -85,7 +83,6 @@ const App = () => {
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
-          {workflowOpen && <WorkflowView agent={agent} />}
           {/* Always mounted so checklist state persists and agent edits land
               in real time; it auto-surfaces whenever the agent updates it. */}
           <InspectionView
@@ -94,11 +91,7 @@ const App = () => {
             open={inspectionOpen}
           />
           {!inspectionOpen && <ChatThread agent={agent} />}
-          <Composer
-            agent={agent}
-            onToggleWorkflow={() => setWorkflowOpen((open) => !open)}
-            workflowOpen={workflowOpen}
-          />
+          <Composer agent={agent} />
         </main>
         <VoiceDock agent={agent} />
         {agentPanelOpen && <AgentPanel agent={agent} />}

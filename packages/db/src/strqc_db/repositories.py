@@ -14,13 +14,16 @@ def _rows(cur: sqlite3.Cursor) -> list[dict[str, Any]]:
     return [dict(r) for r in cur.fetchall()]
 
 
+def _row(cur: sqlite3.Cursor) -> dict[str, Any] | None:
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
 # ── properties ───────────────────────────────────────────────────────────────
 
 
 def get_property(conn: sqlite3.Connection, unit_code: str) -> dict[str, Any] | None:
-    cur = conn.execute("SELECT * FROM property WHERE unit_code = ?", (unit_code,))
-    row = cur.fetchone()
-    return dict(row) if row else None
+    return _row(conn.execute("SELECT * FROM property WHERE unit_code = ?", (unit_code,)))
 
 
 def list_properties(conn: sqlite3.Connection, *, active_only: bool = True) -> list[dict[str, Any]]:
@@ -191,10 +194,11 @@ def create_work_order(conn: sqlite3.Connection, *, property_id: int, task_id: in
 
 
 def get_sync_cursor(conn: sqlite3.Connection, pmc_id: str, resource: str) -> dict[str, Any] | None:
-    row = conn.execute(
-        "SELECT * FROM sync_cursor WHERE pmc_id = ? AND resource = ?", (pmc_id, resource)
-    ).fetchone()
-    return dict(row) if row else None
+    return _row(
+        conn.execute(
+            "SELECT * FROM sync_cursor WHERE pmc_id = ? AND resource = ?", (pmc_id, resource)
+        )
+    )
 
 
 def upsert_sync_cursor(conn: sqlite3.Connection, pmc_id: str, resource: str, *,

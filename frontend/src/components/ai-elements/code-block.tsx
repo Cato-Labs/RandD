@@ -27,7 +27,9 @@ import type {
   HighlighterGeneric,
   ThemedToken,
 } from "shiki";
-import { createHighlighter } from "shiki";
+// shiki is a heavy dependency; import it dynamically so it is code-split out of
+// the initial bundle. Code blocks render raw (unhighlighted) tokens immediately
+// and upgrade to highlighted tokens once the highlighter finishes loading.
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 // oxlint-disable-next-line eslint(no-bitwise)
@@ -155,10 +157,12 @@ const getHighlighter = (
     return cached;
   }
 
-  const highlighterPromise = createHighlighter({
-    langs: [language],
-    themes: ["github-light", "github-dark"],
-  });
+  const highlighterPromise = import("shiki").then(({ createHighlighter }) =>
+    createHighlighter({
+      langs: [language],
+      themes: ["github-light", "github-dark"],
+    })
+  );
 
   highlighterCache.set(language, highlighterPromise);
   return highlighterPromise;

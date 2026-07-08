@@ -4,7 +4,6 @@ import {
   MicOffIcon,
   VideoIcon,
   VideoOffIcon,
-  WorkflowIcon,
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -198,15 +197,7 @@ const PromptQueue = ({ agent }: { agent: LiveAgent }) => {
   );
 };
 
-export const Composer = ({
-  agent,
-  workflowOpen,
-  onToggleWorkflow,
-}: {
-  agent: LiveAgent;
-  workflowOpen: boolean;
-  onToggleWorkflow: () => void;
-}) => {
+export const Composer = ({ agent }: { agent: LiveAgent }) => {
   const [text, setText] = useState("");
 
   const handleSubmit = useCallback(
@@ -342,13 +333,6 @@ export const Composer = ({
                 </MicSelectorList>
               </MicSelectorContent>
             </MicSelector>
-            <PromptInputButton
-              onClick={onToggleWorkflow}
-              variant={workflowOpen ? "default" : "ghost"}
-            >
-              <WorkflowIcon className="size-4" />
-              <span>Workflow</span>
-            </PromptInputButton>
           </PromptInputTools>
           <PromptInputSubmit
             disabled={agent.status !== "connected" && !text.trim()}

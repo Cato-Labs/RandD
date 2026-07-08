@@ -45,4 +45,5 @@ def test_bad_key_length():
 def test_mask_never_reveals():
     assert mask_secret(None) == ""
     assert mask_secret("12") == "••••"
-    assert mask_secret("123456") == "••••6"
+    # Fixed-width mask: reveals neither length nor any character.
+    assert mask_secret("123456") == "••••"
