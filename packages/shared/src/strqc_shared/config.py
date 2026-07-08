@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # Gemini
     google_api_key: str = ""
     strqc_gemini_model_id: str = "gemini-3.1-flash-live-preview"
+    strqc_gemini_thinking_level: str = "HIGH"
+    strqc_gemini_enable_search: bool = False
 
     # OpenAI Realtime
     openai_api_key: str = ""

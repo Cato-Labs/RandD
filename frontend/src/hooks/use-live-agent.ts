@@ -23,6 +23,8 @@ import type {
   LiveModel,
   LiveSegment,
   LiveToolPart,
+  LiveThoughtPart,
+  LiveSearchPart,
   LiveUsage,
   LiveVoice,
   PersonaState,
@@ -56,8 +58,8 @@ export const useLiveAgent = () => {
   const [micActive, setMicActive] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [mode, setMode] = useState<SessionMode>("audio");
-  const [voice, setVoiceState] = useState("alloy");
-  const [model, setModelState] = useState<LiveModel["id"]>("openai");
+  const [voice, setVoiceState] = useState("Puck");
+  const [model, setModelState] = useState<LiveModel["id"]>("gemini");
   const [models, setModels] = useState<LiveModel[]>([]);
   const [micDeviceId, setMicDeviceId] = useState<string | undefined>();
   const [cameraActive, setCameraActive] = useState(false);
@@ -230,6 +232,40 @@ export const useLiveAgent = () => {
     });
   }, []);
 
+  const upsertThoughtPart = useCallback((text: string, state: "streaming" | "done") => {
+    setMessages((prev) => {
+      const next = [...prev];
+      let last = next.at(-1);
+      if (!last || last.role !== "assistant") {
+        last = {
+          id: nanoid(),
+          role: "assistant",
+          parts: [],
+          createdAt: Date.now(),
+        };
+        next.push(last);
+      }
+      const parts = [...last.parts];
+      const index = parts.findIndex((existing) => existing.type === "thought");
+      if (index >= 0) {
+        const existingPart = parts[index] as LiveThoughtPart;
+        parts[index] = {
+          ...existingPart,
+          text: state === "streaming" ? existingPart.text + text : existingPart.text,
+          state,
+        };
+      } else {
+        parts.push({
+          type: "thought",
+          text,
+          state,
+        });
+      }
+      next[next.length - 1] = { ...last, parts };
+      return next;
+    });
+  }, []);
+
   const sendRaw = useCallback((payload: Record<string, unknown>) => {
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
@@ -307,8 +343,56 @@ export const useLiveAgent = () => {
         case "bidi_transcript_stream": {
           const role = event.role === "user" ? "user" : "assistant";
           const text = String(event.text ?? "");
-          if (text) appendText(role, text);
+          if (text) {
+            if (event.thought) {
+              upsertThoughtPart(text, "streaming");
+            } else {
+              appendText(role, text);
+            }
+          }
           if (role === "assistant") setChatStatus("streaming");
+          break;
+        }
+        case "bidi_grounding_metadata": {
+          const queries = (event.queries ?? []) as string[];
+          const chunks = (event.chunks ?? []) as {
+            type: "web" | "image" | "maps";
+            title: string;
+            uri: string;
+            image_uri?: string;
+            domain?: string;
+          }[];
+          
+          setMessages((prev) => {
+            const next = [...prev];
+            let last = next.at(-1);
+            if (!last || last.role !== "assistant") {
+              last = {
+                id: nanoid(),
+                role: "assistant",
+                parts: [],
+                createdAt: Date.now(),
+              };
+              next.push(last);
+            }
+            const parts = [...last.parts];
+            const index = parts.findIndex((existing) => existing.type === "search");
+            if (index >= 0) {
+              parts[index] = {
+                type: "search",
+                queries,
+                chunks,
+              };
+            } else {
+              parts.push({
+                type: "search",
+                queries,
+                chunks,
+              });
+            }
+            next[next.length - 1] = { ...last, parts };
+            return next;
+          });
           break;
         }
         case "bidi_audio_stream": {
@@ -395,6 +479,19 @@ export const useLiveAgent = () => {
           break;
         }
         case "bidi_response_complete": {
+          // Finalize thoughts
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next.at(-1);
+            if (last && last.role === "assistant") {
+              const parts = last.parts.map((part) =>
+                part.type === "thought" ? { ...part, state: "done" as const } : part
+              );
+              next[next.length - 1] = { ...last, parts };
+              return next;
+            }
+            return prev;
+          });
           finalizeAssistantTurn();
           setChatStatus("ready");
           drainQueue();
@@ -428,6 +525,7 @@ export const useLiveAgent = () => {
       refreshAgentCard,
       refreshWorkspace,
       upsertToolPart,
+      upsertThoughtPart,
     ]
   );
 
@@ -651,13 +749,6 @@ export const useLiveAgent = () => {
   const submit = useCallback(
     (payload: SubmitPayload) => {
       if (!payload.text.trim() && payload.files.length === 0) return;
-      if (chatStatusRef.current === "streaming" || chatStatusRef.current === "submitted") {
-        setQueue((prev) => [
-          ...prev,
-          { id: nanoid(), status: "pending", ...payload },
-        ]);
-        return;
-      }
       deliver(payload);
     },
     [deliver]
@@ -685,6 +776,10 @@ export const useLiveAgent = () => {
     if (micActive) return "listening";
     return "idle";
   }, [status, speaking, chatStatus, micActive]);
+
+  useEffect(() => {
+    void connect();
+  }, [connect]);
 
   useEffect(() => () => void disconnect(), [disconnect]);
 

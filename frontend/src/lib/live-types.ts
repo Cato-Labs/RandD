@@ -24,6 +24,24 @@ export type LiveTextPart = {
   state: "streaming" | "done";
 };
 
+export type LiveThoughtPart = {
+  type: "thought";
+  text: string;
+  state: "streaming" | "done";
+};
+
+export type LiveSearchPart = {
+  type: "search";
+  queries: string[];
+  chunks: {
+    type: "web" | "image" | "maps";
+    title: string;
+    uri: string;
+    image_uri?: string;
+    domain?: string;
+  }[];
+};
+
 export type LiveFilePart = {
   type: "file";
   url: string;
@@ -31,7 +49,7 @@ export type LiveFilePart = {
   filename?: string;
 };
 
-export type LivePart = LiveTextPart | LiveToolPart | LiveFilePart;
+export type LivePart = LiveTextPart | LiveToolPart | LiveFilePart | LiveThoughtPart | LiveSearchPart;
 
 export type LiveSegment = {
   id: string;

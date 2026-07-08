@@ -128,6 +128,17 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
         # gemini-3.1-flash-live-preview rejects TEXT-only response modalities,
         # so text-mode sessions ride the same audio session and read transcripts.
         api_key = os.getenv("GOOGLE_API_KEY")
+
+        thinking_level = os.getenv("GEMINI_THINKING_LEVEL") or os.getenv("STRQC_GEMINI_THINKING_LEVEL", "HIGH")
+        enable_search_str = os.getenv("GEMINI_ENABLE_SEARCH") or os.getenv("STRQC_GEMINI_ENABLE_SEARCH", "false")
+        enable_search = enable_search_str.lower() in ("true", "1", "yes")
+
+        inference_config = {}
+        if thinking_level:
+            inference_config["thinking_config"] = {"thinking_level": thinking_level}
+        inference_config["enable_search"] = enable_search
+        provider_config["inference"] = inference_config
+
         return BidiGeminiLiveModel(
             model_id=PROVIDERS["gemini"]["model_id"],
             provider_config=provider_config,

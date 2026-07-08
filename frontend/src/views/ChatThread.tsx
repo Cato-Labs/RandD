@@ -5,8 +5,10 @@ import {
   RefreshCcwIcon,
   TerminalIcon,
   WrenchIcon,
+  Brain as BrainIcon,
+  Search as SearchIcon,
 } from "lucide-react";
-import { Fragment, useCallback } from "react";
+import { Fragment, useCallback, useState, useEffect } from "react";
 import type { UIMessage } from "ai";
 import {
   AudioPlayer,
@@ -28,6 +30,7 @@ import {
   ChainOfThoughtSearchResult,
   ChainOfThoughtSearchResults,
   ChainOfThoughtStep,
+  ChainOfThoughtImage,
 } from "@/components/ai-elements/chain-of-thought";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
 import {
@@ -83,7 +86,7 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import type { LiveAgent } from "@/hooks/use-live-agent";
-import type { LiveMessage, LiveToolPart } from "@/lib/live-types";
+import type { LiveMessage, LiveToolPart, LiveThoughtPart, LiveSearchPart } from "@/lib/live-types";
 import { segmentText } from "@/lib/parse-blocks";
 
 const messageText = (message: LiveMessage): string =>
@@ -225,48 +228,218 @@ const AssistantChainOfThought = ({ message }: { message: LiveMessage }) => {
   const toolParts = message.parts.filter((part): part is LiveToolPart =>
     part.type.startsWith("tool-")
   );
-  if (toolParts.length === 0) return null;
+  const thoughtPart = message.parts.find((part): part is LiveThoughtPart =>
+    part.type === "thought"
+  );
+  const searchPart = message.parts.find((part): part is LiveSearchPart =>
+    part.type === "search"
+  );
+
+  if (toolParts.length === 0 && !thoughtPart && !searchPart) return null;
   const files = toolParts.flatMap(touchedFiles);
   const active = toolParts.some(
     (part) => part.state === "input-streaming" || part.state === "input-available"
-  );
+  ) || (thoughtPart?.state === "streaming");
+
+  const [isOpen, setIsOpen] = useState(active);
+  useEffect(() => {
+    if (active) {
+      setIsOpen(true);
+    }
+  }, [active]);
+
   return (
-    <ChainOfThought defaultOpen={active}>
+    <ChainOfThought open={isOpen} onOpenChange={setIsOpen}>
       <ChainOfThoughtHeader>
         {active ? "Working…" : "Chain of thought"}
       </ChainOfThoughtHeader>
       <ChainOfThoughtContent>
-        {toolParts.map((part) => (
+        {thoughtPart && (
           <ChainOfThoughtStep
-            description={
-              part.state === "output-error" ? part.errorText : undefined
-            }
-            icon={
-              part.toolName === "shell"
-                ? TerminalIcon
-                : part.toolName === "editor"
-                  ? FileCodeIcon
-                  : WrenchIcon
-            }
-            key={part.toolCallId}
-            label={part.toolName}
-            status={
-              part.state === "output-available" || part.state === "output-error"
-                ? "complete"
-                : "active"
-            }
+            icon={BrainIcon}
+            label="thinking"
+            status={thoughtPart.state === "done" ? "complete" : "active"}
           >
-            {touchedFiles(part).length > 0 && (
-              <ChainOfThoughtSearchResults>
-                {touchedFiles(part).map((file) => (
-                  <ChainOfThoughtSearchResult key={file}>
-                    {file}
-                  </ChainOfThoughtSearchResult>
-                ))}
-              </ChainOfThoughtSearchResults>
+            {thoughtPart.text && (
+              <div className="max-w-2xl bg-muted/40 p-2.5 rounded-md border border-border/50 text-xs">
+                <MessageResponse isAnimating={thoughtPart.state === "streaming"}>
+                  {thoughtPart.text}
+                </MessageResponse>
+              </div>
             )}
           </ChainOfThoughtStep>
-        ))}
+        )}
+
+        {searchPart && (searchPart.queries.length > 0 || searchPart.chunks.length > 0) && (
+          <ChainOfThoughtStep
+            icon={SearchIcon}
+            label="google search"
+            status="complete"
+          >
+            {searchPart.queries.length > 0 && (
+              <div className="text-xs text-muted-foreground mb-1">
+                Searched: {searchPart.queries.join(", ")}
+              </div>
+            )}
+            
+            {searchPart.chunks.some(c => c.type === "web") && (
+              <ChainOfThoughtSearchResults className="mt-1">
+                {searchPart.chunks
+                  .filter(c => c.type === "web")
+                  .map((chunk) => (
+                    <ChainOfThoughtSearchResult key={chunk.uri}>
+                      <a
+                        href={chunk.uri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline flex items-center gap-1"
+                      >
+                        {chunk.domain && <span className="opacity-70">[{chunk.domain}]</span>}
+                        {chunk.title}
+                      </a>
+                    </ChainOfThoughtSearchResult>
+                  ))}
+              </ChainOfThoughtSearchResults>
+            )}
+
+            {searchPart.chunks
+              .filter(c => c.type === "image" && c.image_uri)
+              .map((chunk) => (
+                <ChainOfThoughtImage key={chunk.uri} caption={chunk.title}>
+                  <a href={chunk.uri} target="_blank" rel="noopener noreferrer">
+                    <img
+                      src={chunk.image_uri}
+                      alt={chunk.title}
+                      className="max-h-72 object-contain rounded-md"
+                    />
+                  </a>
+                </ChainOfThoughtImage>
+              ))}
+          </ChainOfThoughtStep>
+        )}
+
+        {toolParts.map((part) => {
+          const isSearchMemory = part.toolName === "search_memory";
+          let memoryResults: any[] = [];
+          if (isSearchMemory && part.output) {
+            if (Array.isArray(part.output)) {
+              memoryResults = part.output;
+            } else if (typeof part.output === "string") {
+              try {
+                memoryResults = JSON.parse(part.output);
+              } catch {}
+            }
+          }
+
+          return (
+            <ChainOfThoughtStep
+              icon={
+                isSearchMemory
+                  ? SearchIcon
+                  : part.toolName === "shell"
+                    ? TerminalIcon
+                    : part.toolName === "editor"
+                      ? FileCodeIcon
+                      : WrenchIcon
+              }
+              key={part.toolCallId}
+              label={part.toolName}
+              status={
+                part.state === "output-available" || part.state === "output-error"
+                  ? "complete"
+                  : "active"
+              }
+            >
+              {touchedFiles(part).length > 0 && (
+                <ChainOfThoughtSearchResults className="mb-2">
+                  {touchedFiles(part).map((file) => (
+                    <ChainOfThoughtSearchResult key={file}>
+                      {file}
+                    </ChainOfThoughtSearchResult>
+                  ))}
+                </ChainOfThoughtSearchResults>
+              )}
+
+              {isSearchMemory && !!part.input && (
+                <div className="text-xs text-muted-foreground mb-2">
+                  Query: {typeof part.input === "string" ? part.input : (part.input as any)?.query ?? JSON.stringify(part.input)}
+                </div>
+              )}
+
+              {isSearchMemory && memoryResults.length > 0 && (
+                <ChainOfThoughtSearchResults className="mt-1 mb-2">
+                  {memoryResults.map((res: any, idx: number) => {
+                    const title = res.metadata?._document_title || `Result ${idx + 1}`;
+                    const uri = res.metadata?._source_uri || res.metadata?._source_location?.s3Location?.uri;
+                    return (
+                      <ChainOfThoughtSearchResult key={idx}>
+                        {uri ? (
+                          <a
+                            href={uri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline flex items-center gap-1"
+                          >
+                            <span className="opacity-70">[{res.store_name || "memory"}]</span>
+                            {title}
+                          </a>
+                        ) : (
+                          <span>[{res.store_name || "memory"}] {title}</span>
+                        )}
+                      </ChainOfThoughtSearchResult>
+                    );
+                  })}
+                </ChainOfThoughtSearchResults>
+              )}
+
+              {isSearchMemory && memoryResults.length > 0 && (
+                <div className="space-y-1.5 mt-2">
+                  {memoryResults.map((res: any, idx: number) => (
+                    <div key={idx} className="text-xs text-muted-foreground/80 bg-muted/20 p-2.5 rounded border border-border/30">
+                      <div className="font-semibold text-[10px] text-muted-foreground/60 uppercase mb-1">
+                        Snippet {idx + 1} ({res.metadata?._relevance_score ? `score: ${res.metadata._relevance_score.toFixed(3)}` : "relevance match"})
+                      </div>
+                      <MessageResponse>
+                        {res.content}
+                      </MessageResponse>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!isSearchMemory && !!part.input && (
+                <div className="text-xs text-muted-foreground/80 mt-1 font-mono bg-muted/30 p-2 rounded border border-border/40 max-w-full overflow-x-auto">
+                  <span className="text-muted-foreground/60 select-none">$ </span>
+                  {typeof part.input === "string"
+                    ? part.input
+                    : (part.input as any)?.command
+                      ? (part.input as any).command
+                      : JSON.stringify(part.input, null, 2)}
+                </div>
+              )}
+
+              {part.errorText && (
+                <div className="text-xs text-destructive mt-1 font-mono bg-destructive/10 p-2 rounded border border-destructive/20">
+                  {part.errorText}
+                </div>
+              )}
+
+              {!isSearchMemory && part.output !== undefined && (
+                <div className="mt-1 bg-muted/20 p-2 rounded border border-border/30 text-xs">
+                  {typeof part.output === "string" ? (
+                    <MessageResponse isAnimating={part.state === "input-streaming"}>
+                      {part.output}
+                    </MessageResponse>
+                  ) : (
+                    <pre className="text-xs text-muted-foreground/80 font-mono overflow-x-auto">
+                      {JSON.stringify(part.output, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </ChainOfThoughtStep>
+          );
+        })}
         {files.length > 0 && (
           <Task defaultOpen={false}>
             <TaskTrigger
@@ -367,7 +540,14 @@ export const ChatThread = ({ agent }: { agent: LiveAgent }) => {
                     </a>
                   );
                 }
-                return <ToolPartView key={index} part={part as LiveToolPart} />;
+                if (part.type.startsWith("tool-")) {
+                  const toolPart = part as LiveToolPart;
+                  if (toolPart.toolName === "search_memory") {
+                    return null;
+                  }
+                  return <ToolPartView key={index} part={toolPart} />;
+                }
+                return null;
               })}
               {message.audioUrl && <TurnAudio url={message.audioUrl} />}
               <MessageActions>

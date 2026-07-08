@@ -37,9 +37,17 @@ def build_model(provider: str | None = None, provider_config: dict | None = None
         from strands.experimental.bidi.models.gemini_live import BidiGeminiLiveModel
 
         client_config = {"api_key": settings.google_api_key} if settings.google_api_key else None
+        
+        real_provider_config = (provider_config or {}).copy()
+        real_provider_config["inference"] = real_provider_config.get("inference", {}).copy()
+        if settings.strqc_gemini_thinking_level:
+            real_provider_config["inference"]["thinking_config"] = real_provider_config["inference"].get("thinking_config", {}).copy()
+            real_provider_config["inference"]["thinking_config"].setdefault("thinking_level", settings.strqc_gemini_thinking_level)
+        real_provider_config["inference"]["enable_search"] = settings.strqc_gemini_enable_search
+
         return BidiGeminiLiveModel(
             model_id=settings.strqc_gemini_model_id,
-            provider_config=provider_config,
+            provider_config=real_provider_config,
             client_config=client_config,
         )
 
