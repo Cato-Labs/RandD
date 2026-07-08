@@ -47,6 +47,8 @@ server {
     root /var/www/strqc/frontend/dist;
     index index.html;
 
+    client_max_body_size 100M;
+
     location / {
         try_files $uri $uri/ /index.html;
     }
@@ -91,6 +93,8 @@ server {
     index index.html;
 
     server_name _;
+
+    client_max_body_size 100M;
 
     location / {
         try_files $uri $uri/ /index.html;

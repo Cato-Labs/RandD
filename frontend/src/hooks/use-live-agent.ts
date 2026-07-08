@@ -636,14 +636,19 @@ export const useLiveAgent = () => {
   const startCamera = useCallback(
     async (deviceId?: string) => {
       cameraRef.current?.stop();
-      const capture = new CameraCapture((jpegBase64) => {
-        lastFrameRef.current = jpegBase64;
-        sendRaw({
-          type: "bidi_image_input",
-          image: jpegBase64,
-          mime_type: "image/jpeg",
-        });
-      });
+      const capture = new CameraCapture(
+        (jpegBase64) => {
+          lastFrameRef.current = jpegBase64;
+          sendRaw({
+            type: "bidi_image_input",
+            image: jpegBase64,
+            mime_type: "image/jpeg",
+          });
+        },
+        2000,
+        640,
+        0.4
+      );
       await capture.start(deviceId ?? cameraDeviceId, cameraFacingRef.current);
       cameraRef.current = capture;
       setCameraStream(capture.mediaStream);

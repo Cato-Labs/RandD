@@ -1526,16 +1526,41 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
           return base64;
         }catch(e){ return src; }
       }
+      // Embed a video URL as a base64 data URL so the exported report is a
+      // self-contained artifact (PRD / AGENTS.md Addendum 1): the file is shared
+      // as a Slack attachment with no connection back to /workspace, so a
+      // relative URL would not play. The server already returns a COMPACT web
+      // MP4 (see /api/inspection/video), keeping the embed reasonable.
+      async function videoToDataUrl(src){
+        if(!src) return src;
+        // A leftover blob: preview means the upload never completed — drop it so
+        // the export never carries an unusable/oversized raw recording.
+        if(src.indexOf('blob:') === 0) return null;
+        if(src.indexOf('data:') === 0) return src;
+        try{
+          const blob = await (await fetch(src)).blob();
+          return await new Promise(function(resolve, reject){
+            const r = new FileReader();
+            r.onload = function(){ resolve(r.result); };
+            r.onerror = reject;
+            r.readAsDataURL(blob);
+          });
+        }catch(e){
+          // Server unreachable / fetch failed: drop rather than bake a dead link.
+          return null;
+        }
+      }
       const state = window.qcInspection.getState();
       for(const it of state.items){
         for(const p of it.photos) p.src = await toDataUrl(p.src);
       }
       for(const s of state.sections){
-        // Videos stay as /workspace/... URLs — never base64-embedded (keeps the
-        // export small). Only leftover blob: previews (failed upload) are dropped
-        // entirely so the export carries no raw video bytes AND rehydration does
-        // not try to render a video card with a null src.
-        if(s.video && s.video.src && s.video.src.indexOf('blob:') === 0){
+        if(!s.video) continue;
+        const embedded = await videoToDataUrl(s.video.src);
+        if(embedded){
+          s.video.src = embedded;
+        } else {
+          // Failed upload or unreachable server → no playable video to embed.
           s.video = null;
         }
       }

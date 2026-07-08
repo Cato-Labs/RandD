@@ -250,8 +250,17 @@ export const InspectionView = ({
         busy = false;
       }
     };
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === "qc-form-changed") {
+        sync();
+      }
+    };
+    window.addEventListener("message", handleMessage);
     const timer = window.setInterval(sync, 5000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      window.clearInterval(timer);
+    };
   }, [ready]);
 
   return (
