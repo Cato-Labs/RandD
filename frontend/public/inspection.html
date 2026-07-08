@@ -372,6 +372,66 @@ main{max-width:760px;margin:0 auto;padding:40px 20px 96px}
   background: transparent !important;
 }
 
+/* ---------- Property selector (header dropdown) ---------- */
+.property-select-wrap{margin-bottom:26px;max-width:420px}
+.property-select-wrap .label-caps{color:rgba(255,255,255,.55);margin-bottom:7px}
+.property-select{
+  position:relative;display:flex;align-items:center;
+}
+.property-select select{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  width:100%;padding:13px 44px 13px 16px;cursor:pointer;
+  font:inherit;font-size:16px;font-weight:600;color:#fff;
+  background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.2);border-radius:var(--r-md);
+  transition:background .25s,border-color .25s,box-shadow .25s;
+}
+.property-select select:hover{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.32)}
+.property-select select:focus{outline:none;border-color:var(--secondary-fixed-dim);
+  box-shadow:0 0 0 3px rgba(233,195,73,.28)}
+.property-select select option{color:var(--on-surface);background:var(--surface-container-lowest)}
+.property-select::after{
+  content:"";position:absolute;right:18px;pointer-events:none;
+  width:9px;height:9px;border-right:2px solid rgba(255,255,255,.7);
+  border-bottom:2px solid rgba(255,255,255,.7);transform:rotate(45deg) translateY(-2px);
+}
+
+/* ---------- Auditor signature (sign-off) ---------- */
+.signoff-block{margin:8px auto 4px;max-width:420px;text-align:left}
+.signoff-block .label-caps{color:rgba(255,255,255,.62);margin-bottom:8px;text-align:left}
+.inspector-select{position:relative;display:flex;align-items:center;margin-bottom:18px}
+.inspector-select select{
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
+  width:100%;padding:12px 42px 12px 15px;cursor:pointer;
+  font:inherit;font-size:15px;font-weight:600;color:var(--primary);
+  background:#fff;border:1px solid transparent;border-radius:var(--r-md);
+}
+.inspector-select select:focus{outline:none;box-shadow:0 0 0 3px rgba(233,195,73,.4)}
+.inspector-select::after{
+  content:"";position:absolute;right:16px;pointer-events:none;
+  width:8px;height:8px;border-right:2px solid var(--outline);
+  border-bottom:2px solid var(--outline);transform:rotate(45deg) translateY(-2px);
+}
+.sig-pad-wrap{position:relative;border-radius:var(--r-md);overflow:hidden;
+  background:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+.sig-pad{display:block;width:100%;height:150px;touch-action:none;cursor:crosshair;background:#fff}
+.sig-baseline{position:absolute;left:16px;right:16px;bottom:34px;height:1px;
+  background:var(--outline-variant);pointer-events:none}
+.sig-x{position:absolute;left:16px;bottom:16px;font-size:13px;font-weight:700;
+  color:var(--outline);pointer-events:none;letter-spacing:.04em}
+.sig-clear{position:absolute;top:8px;right:8px;padding:6px 14px;border:none;cursor:pointer;
+  font:inherit;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--on-surface-variant);background:var(--surface-container);border-radius:9999px;
+  transition:background .2s,color .2s}
+.sig-clear:hover{background:var(--surface-container-high);color:var(--primary)}
+.sig-hint{margin-top:9px;font-size:12.5px;color:rgba(255,255,255,.5);text-align:left}
+.sig-img{display:block;width:100%;max-height:150px;object-fit:contain;background:#fff;padding:8px}
+/* Read-only after sign-off: hide the drawing affordances, keep the ink. */
+.is-signed .sig-clear,.is-signed .sig-baseline,.is-signed .sig-x{display:none!important}
+.is-signed .sig-pad{cursor:default;pointer-events:none}
+.is-signed .inspector-select::after{display:none}
+.is-signed .inspector-select select{background:transparent;color:#fff;padding-left:0;pointer-events:none;font-size:16px}
+
 footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
   font-size:13px;color:var(--outline)}
 
@@ -405,15 +465,23 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
 <!-- Property header -->
 <header class="property-header">
   <div class="ph-inner">
-    <div class="label-caps ph-eyebrow">Master Turnover Inspection · 2026-07-03</div>
-    <h1 class="ph-title">Lakefront Bay View</h1>
-    <p class="ph-sub">701 Cove Dr, Big Bear Lake, CA 92315 · Boulder Bay</p>
+    <div class="label-caps ph-eyebrow" id="phEyebrow">Master Turnover Inspection</div>
+    <h1 class="ph-title" id="phTitle">Select a home</h1>
+    <p class="ph-sub" id="phSub">Choose the property being inspected to begin.</p>
+
+    <div class="property-select-wrap">
+      <div class="label-caps">Home being inspected</div>
+      <div class="property-select">
+        <select id="propertySelect" aria-label="Select the home being inspected">
+          <option value="">Loading homes…</option>
+        </select>
+      </div>
+    </div>
+
     <div class="ph-meta">
-      <div><div class="label-caps">Unit Code</div><div class="val">LBV</div></div>
-      <div><div class="label-caps">Housekeeper</div><div class="val">Bertha</div></div>
-      <div><div class="label-caps">QC Inspector</div><div class="val">Dan</div></div>
-      <div><div class="label-caps">Guest Arrival</div><div class="val">Jul 2, 2026 · 4:00 PM</div></div>
-      <div><div class="label-caps">Door Code</div><div class="val">4135</div></div>
+      <div><div class="label-caps">Unit Code</div><div class="val" id="phUnitCode">—</div></div>
+      <div><div class="label-caps">Cluster</div><div class="val" id="phCluster">—</div></div>
+      <div><div class="label-caps">QC Inspector</div><div class="val" id="phInspector">—</div></div>
     </div>
     <div class="status-chip" id="statusChip"><span class="dot"></span><span id="statusText">Turnover in progress</span></div>
   </div>
@@ -551,13 +619,32 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
     <svg class="laurel" viewBox="0 0 24 24"><path d="M12 3l2.2 4.4 4.9.7-3.5 3.5.8 4.9L12 14.2l-4.4 2.3.8-4.9L4.9 8.1l4.9-.7L12 3z"/></svg>
     <h2 class="summary-title serif">To Sum Up</h2>
     <p class="summary-sub" id="summarySub">0 of 0 items complete</p>
+
+    <div class="signoff-block">
+      <div class="label-caps">QC Inspector</div>
+      <div class="inspector-select">
+        <select id="inspectorSelect" aria-label="Select the QC inspector signing off">
+          <option value="">Loading inspectors…</option>
+        </select>
+      </div>
+
+      <div class="label-caps">Inspector signature</div>
+      <div class="sig-pad-wrap">
+        <canvas class="sig-pad" id="sigPad" aria-label="Sign here to authorize sign-off"></canvas>
+        <div class="sig-baseline"></div>
+        <span class="sig-x">✕</span>
+        <button class="sig-clear" type="button" id="sigClear">Clear</button>
+      </div>
+      <p class="sig-hint" id="sigHint">Sign above to authorize this inspection.</p>
+    </div>
+
     <button class="btn-ready" id="btnReady" disabled>Ready for guests</button>
     <p class="summary-note" id="summaryNote">Sign-off unlocks when every item is complete.</p>
   </section>
 
 </main>
 
-<footer>Ron AI · Turnover Quality Control · Lakefront Bay View (LBV)</footer>
+<footer id="pageFooter">Ron AI · Turnover Quality Control</footer>
 
 <script>
 (function(){
@@ -576,6 +663,173 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
   const btnReady = document.getElementById('btnReady');
   const summaryNote = document.getElementById('summaryNote');
   let signed = false;
+
+  /* ---------- Property + inspector selection state ---------- */
+  const propertySelect = document.getElementById('propertySelect');
+  const inspectorSelect = document.getElementById('inspectorSelect');
+  const phTitle = document.getElementById('phTitle');
+  const phSub = document.getElementById('phSub');
+  const phUnitCode = document.getElementById('phUnitCode');
+  const phCluster = document.getElementById('phCluster');
+  const phInspector = document.getElementById('phInspector');
+  const pageFooter = document.getElementById('pageFooter');
+  // selectedProperty: {id, unitCode, name, address, cluster, qcAssignee}
+  let selectedProperty = null;
+  let propertyList = [];
+
+  function applyProperty(prop){
+    selectedProperty = prop || null;
+    if(prop){
+      phTitle.textContent = prop.name || prop.unitCode || 'Home';
+      const subParts = [prop.address, prop.cluster].filter(Boolean);
+      phSub.textContent = subParts.join(' · ') || 'Property selected.';
+      phUnitCode.textContent = prop.unitCode || '—';
+      phCluster.textContent = prop.cluster || '—';
+      if(prop.qcAssignee) phInspector.textContent = prop.qcAssignee;
+      pageFooter.textContent = 'Ron AI · Turnover Quality Control · ' +
+        (prop.name || prop.unitCode) + (prop.unitCode ? ' (' + prop.unitCode + ')' : '');
+      document.title = 'Turnover Inspection — ' + (prop.name || prop.unitCode);
+    } else {
+      phTitle.textContent = 'Select a home';
+      phSub.textContent = 'Choose the property being inspected to begin.';
+      phUnitCode.textContent = '—';
+      phCluster.textContent = '—';
+      pageFooter.textContent = 'Ron AI · Turnover Quality Control';
+    }
+    update();
+  }
+
+  /* Populate the property dropdown from the backend roster. On a rehydrated
+     export the baked-in property is used as the pre-selection. */
+  (function loadProperties(){
+    const boot = window.__QC_STATE__;
+    const preUnit = boot && boot.property;
+    fetch('/api/properties')
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        propertyList = (data && data.properties) || [];
+        propertySelect.innerHTML =
+          '<option value="">Select a home…</option>' +
+          propertyList.map(function(p){
+            const label = (p.name || p.unitCode) + (p.unitCode ? ' (' + p.unitCode + ')' : '');
+            return '<option value="' + p.unitCode + '">' + label + '</option>';
+          }).join('');
+        if(preUnit){
+          const match = propertyList.find(function(p){ return p.unitCode === preUnit; });
+          if(match){ propertySelect.value = preUnit; applyProperty(match); }
+        }
+      })
+      .catch(function(){
+        propertySelect.innerHTML = '<option value="">Unable to load homes</option>';
+      });
+  })();
+
+  propertySelect.addEventListener('change', function(){
+    const match = propertyList.find(function(p){ return p.unitCode === propertySelect.value; });
+    applyProperty(match || null);
+  });
+
+  /* Populate the QC inspector dropdown. */
+  (function loadInspectors(){
+    const boot = window.__QC_STATE__;
+    const preInspector = boot && boot.inspector;
+    fetch('/api/inspectors')
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        const inspectors = (data && data.inspectors) || [];
+        inspectorSelect.innerHTML =
+          '<option value="">Select inspector…</option>' +
+          inspectors.map(function(i){
+            return '<option value="' + i.name + '">' + i.name + '</option>';
+          }).join('');
+        if(preInspector){ inspectorSelect.value = preInspector; }
+      })
+      .catch(function(){
+        inspectorSelect.innerHTML = '<option value="">Unable to load inspectors</option>';
+      });
+  })();
+  inspectorSelect.addEventListener('change', update);
+
+  /* ---------- Auditor signature pad ---------- */
+  const sigPad = document.getElementById('sigPad');
+  const sigClear = document.getElementById('sigClear');
+  const sigHint = document.getElementById('sigHint');
+  const sigCtx = sigPad.getContext('2d');
+  let sigHasInk = false;
+  let sigDrawing = false;
+
+  function sigResize(){
+    // Preserve current ink across a resize by snapshotting to a data URL.
+    const prev = sigHasInk ? sigPad.toDataURL('image/png') : null;
+    const ratio = window.devicePixelRatio || 1;
+    const rect = sigPad.getBoundingClientRect();
+    const w = rect.width || 388;
+    const h = 150;
+    sigPad.width = Math.round(w * ratio);
+    sigPad.height = Math.round(h * ratio);
+    sigCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    sigCtx.lineWidth = 2.2;
+    sigCtx.lineCap = 'round';
+    sigCtx.lineJoin = 'round';
+    sigCtx.strokeStyle = '#17211d';
+    if(prev){
+      const img = new Image();
+      img.onload = function(){ sigCtx.drawImage(img, 0, 0, w, h); };
+      img.src = prev;
+    }
+  }
+  window.addEventListener('resize', sigResize);
+  sigResize();
+
+  function sigPos(e){
+    const rect = sigPad.getBoundingClientRect();
+    const point = (e.touches && e.touches[0]) || e;
+    return { x: point.clientX - rect.left, y: point.clientY - rect.top };
+  }
+  function sigStart(e){
+    if(signed) return;
+    e.preventDefault();
+    sigDrawing = true;
+    const p = sigPos(e);
+    sigCtx.beginPath();
+    sigCtx.moveTo(p.x, p.y);
+  }
+  function sigMove(e){
+    if(!sigDrawing || signed) return;
+    e.preventDefault();
+    const p = sigPos(e);
+    sigCtx.lineTo(p.x, p.y);
+    sigCtx.stroke();
+    if(!sigHasInk){ sigHasInk = true; update(); }
+  }
+  function sigEnd(){ sigDrawing = false; }
+
+  sigPad.addEventListener('mousedown', sigStart);
+  sigPad.addEventListener('mousemove', sigMove);
+  window.addEventListener('mouseup', sigEnd);
+  sigPad.addEventListener('touchstart', sigStart, { passive: false });
+  sigPad.addEventListener('touchmove', sigMove, { passive: false });
+  sigPad.addEventListener('touchend', sigEnd);
+
+  function clearSignature(){
+    sigCtx.clearRect(0, 0, sigPad.width, sigPad.height);
+    sigHasInk = false;
+    update();
+  }
+  sigClear.addEventListener('click', clearSignature);
+
+  function setSignatureFromDataUrl(dataUrl){
+    if(!dataUrl) return;
+    const img = new Image();
+    img.onload = function(){
+      const rect = sigPad.getBoundingClientRect();
+      sigCtx.clearRect(0, 0, sigPad.width, sigPad.height);
+      sigCtx.drawImage(img, 0, 0, rect.width || 388, 150);
+      sigHasInk = true;
+      update();
+    };
+    img.src = dataUrl;
+  }
 
   /* ---------- Accordion sections ---------- */
   const CHEV_ICON = '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
@@ -924,14 +1178,31 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
       badge.classList.toggle('done', sDone === secItems.length);
     });
 
-    const complete = done === total;
+    const itemsComplete = total > 0 && done === total;
+    const hasProperty = !!selectedProperty;
+    const hasInspector = !!(inspectorSelect && inspectorSelect.value);
+    const canSign = itemsComplete && hasProperty && hasInspector && sigHasInk;
+
+    // progress bar tracks only checklist items; sign-off has extra gates below
+    if(sigHint){
+      sigHint.textContent = sigHasInk
+        ? 'Signature captured.'
+        : 'Sign above to authorize this inspection.';
+    }
+
     if(!signed){
-      btnReady.disabled = !complete;
-      btnReady.classList.toggle('armed', complete);
-      summaryNote.textContent = complete
-        ? 'Every item checked. Confirm the home is guest-ready.'
-        : 'Sign-off unlocks when every item is complete.';
-      if(complete){
+      btnReady.disabled = !canSign;
+      btnReady.classList.toggle('armed', canSign);
+
+      let note;
+      if(!hasProperty) note = 'Select the home being inspected to begin.';
+      else if(!itemsComplete) note = 'Sign-off unlocks when every item is complete.';
+      else if(!hasInspector) note = 'Select the QC inspector signing off.';
+      else if(!sigHasInk) note = 'Add the inspector signature to sign off.';
+      else note = 'All set. Confirm the home is guest-ready.';
+      summaryNote.textContent = note;
+
+      if(itemsComplete){
         chip.classList.add('ready'); statusText.textContent = 'All checks complete';
       } else {
         chip.classList.remove('ready'); statusText.textContent = 'Turnover in progress';
@@ -948,8 +1219,10 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
     statusText.textContent = 'Ready for guests';
     chip.classList.add('ready');
     document.body.classList.add('is-signed');
+    const inspectorName = (inspectorSelect && inspectorSelect.value) || 'Inspector';
+    if(phInspector) phInspector.textContent = inspectorName;
     const now = new Date();
-    summaryNote.textContent = 'Signed off by Dan · ' +
+    summaryNote.textContent = 'Signed off by ' + inspectorName + ' · ' +
       now.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + ' at ' +
       now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   });
@@ -1044,7 +1317,10 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
       return {
         formId: formId,
         createdUtc: formCreatedUtc,
-        property: 'LBV',
+        property: selectedProperty ? selectedProperty.unitCode : '',
+        propertyDetail: selectedProperty || null,
+        inspector: (inspectorSelect && inspectorSelect.value) || '',
+        signature: sigHasInk ? sigPad.toDataURL('image/png') : null,
         signedOff: signed,
         repairs: document.getElementById('repairsNote').value,
         temp: (document.querySelector('.temp-input') || {}).value || '',
@@ -1134,10 +1410,46 @@ footer{max-width:760px;margin:0 auto;padding:32px 20px 48px;text-align:center;
     });
     if(boot.repairs) document.getElementById('repairsNote').value = boot.repairs;
     if(boot.temp){ const t = document.querySelector('.temp-input'); if(t) t.value = boot.temp; }
+
+    // Property + inspector: rehydrate from the baked-in detail so a standalone
+    // export (opened offline from a Slack download, no backend) still shows the
+    // right home and inspector even when /api/properties can't be reached.
+    if(boot.propertyDetail){
+      const p = boot.propertyDetail;
+      if(propertySelect && !propertySelect.querySelector('option[value="' + p.unitCode + '"]')){
+        const opt = document.createElement('option');
+        opt.value = p.unitCode;
+        opt.textContent = (p.name || p.unitCode) + (p.unitCode ? ' (' + p.unitCode + ')' : '');
+        propertySelect.appendChild(opt);
+      }
+      if(propertySelect) propertySelect.value = p.unitCode;
+      applyProperty(p);
+    }
+    if(boot.inspector && inspectorSelect){
+      if(!inspectorSelect.querySelector('option[value="' + boot.inspector + '"]')){
+        const opt = document.createElement('option');
+        opt.value = boot.inspector; opt.textContent = boot.inspector;
+        inspectorSelect.appendChild(opt);
+      }
+      inspectorSelect.value = boot.inspector;
+    }
+    if(boot.signature) setSignatureFromDataUrl(boot.signature);
+
     update();
     if(boot.signedOff){
+      // Force the signed state directly — the async signature/detail loads
+      // above mean the button's live gate may not be satisfied synchronously.
+      signed = true;
+      btnReady.classList.remove('armed');
+      btnReady.classList.add('signed');
+      btnReady.disabled = false;
+      btnReady.textContent = '✓ Signed off — Ready for guests';
+      statusText.textContent = 'Ready for guests';
+      chip.classList.add('ready');
       document.body.classList.add('is-signed');
-      if(!btnReady.disabled) btnReady.click();
+      const who = boot.inspector || 'Inspector';
+      if(phInspector) phInspector.textContent = who;
+      summaryNote.textContent = 'Signed off by ' + who;
     }
   })();
 })();

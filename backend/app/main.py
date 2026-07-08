@@ -212,6 +212,22 @@ async def get_voices(provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|o
     return {"voices": VOICES[provider]}
 
 
+@app.get("/api/properties")
+async def get_properties() -> dict[str, Any]:
+    """Active homes for the inspection form's property dropdown."""
+    from app.properties import list_properties
+
+    return {"properties": await run_in_threadpool(list_properties)}
+
+
+@app.get("/api/inspectors")
+async def get_inspectors() -> dict[str, Any]:
+    """QC inspectors who can sign off an inspection."""
+    from app.properties import list_inspectors
+
+    return {"inspectors": await run_in_threadpool(list_inspectors)}
+
+
 @app.get("/api/workspace")
 async def get_workspace() -> dict[str, Any]:
     files = [
