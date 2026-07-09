@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   SparklesIcon,
   SunIcon,
@@ -6,7 +6,16 @@ import {
   MessageCircleIcon,
 } from "lucide-react";
 import { useLiveAgent } from "@/hooks/use-live-agent";
-import { getWorkspace, TODAY_STOPS, type Stop, type Workspace } from "@/lib/tenancy";
+import {
+  fetchChecklist,
+  fetchClusters,
+  fetchDay,
+  fetchNotifications,
+  type ChecklistSection,
+  type Cluster,
+  type Notification,
+  type Task,
+} from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
 import { MyDay } from "@/views/mobile/MyDay";
 import { Messages } from "@/views/mobile/Messages";
@@ -23,41 +32,54 @@ const TABS: { id: Tab; label: string; icon: typeof SunIcon }[] = [
   { id: "profile", label: "Profile", icon: UserIcon },
 ];
 
-export function AppShell({ workspaceId }: { workspaceId: string }) {
+export function AppShell({ clusterId }: { clusterId: number }) {
   const agent = useLiveAgent();
-  const workspace = getWorkspace(workspaceId) as Workspace;
   const [tab, setTab] = useState<Tab>("day");
-  const [qcStop, setQcStop] = useState<Stop | null>(null);
+  const [qcTask, setQcTask] = useState<Task | null>(null);
 
-  // Unread count drives the Messages badge.
-  const unread = 1;
+  const [cluster, setCluster] = useState<Cluster | null>(null);
+  const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [checklist, setChecklist] = useState<ChecklistSection[]>([]);
+  const [notifications, setNotifications] = useState<Notification[] | null>(null);
 
-  // The AI Chat tab is the only full-forest screen; the rest are cream, so the
-  // nav goes light there to avoid an all-green interface ("too much green").
+  useEffect(() => {
+    fetchClusters().then((list) => setCluster(list.find((c) => c.id === clusterId) ?? null));
+    fetchDay(clusterId).then(setTasks);
+    fetchChecklist().then(setChecklist);
+    fetchNotifications().then(setNotifications);
+  }, [clusterId]);
+
+  const unread = notifications?.length ?? 0;
   const dark = tab === "chat";
 
   return (
     <div className="field-app">
-      {qcStop ? (
-        <QCFlow agent={agent} stop={qcStop} onExit={() => setQcStop(null)} />
+      {qcTask ? (
+        <QCFlow
+          agent={agent}
+          task={qcTask}
+          sections={checklist}
+          onExit={() => setQcTask(null)}
+        />
       ) : (
         <>
-          {/* Each screen owns its own scrolling so the co-pilot can pin its
-              input bar while the itinerary scrolls freely — no nested bars. */}
           <div className="flex min-h-0 flex-1 flex-col">
             {tab === "day" && (
               <div className="field-scroll">
                 <MyDay
-                  workspace={workspace}
-                  stops={TODAY_STOPS}
-                  onStartQC={(stop) => setQcStop(stop)}
+                  cluster={cluster}
+                  tasks={tasks}
+                  checklist={checklist}
+                  onStartQC={setQcTask}
                   onOpenChat={() => setTab("chat")}
                 />
               </div>
             )}
-            {tab === "messages" && <Messages />}
+            {tab === "messages" && (
+              <Messages cluster={cluster} notifications={notifications} tasks={tasks} />
+            )}
             {tab === "chat" && <CoPilot agent={agent} />}
-            {tab === "profile" && <Profile workspace={workspace} />}
+            {tab === "profile" && <Profile cluster={cluster} />}
           </div>
 
           {/* Adaptive nav: forest on the immersive AI Chat, a light sage-gray

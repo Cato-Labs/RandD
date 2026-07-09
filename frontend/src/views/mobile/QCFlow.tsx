@@ -10,40 +10,40 @@ import {
 import { CopilotOrb } from "@/components/mobile/CopilotOrb";
 import { Eyebrow, PropertyTone } from "@/components/mobile/bits";
 import type { LiveAgent } from "@/hooks/use-live-agent";
-import type { QcCheckpoint, QcSection, Stop } from "@/lib/tenancy";
+import { toneFor, type ChecklistSection, type Task } from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
 
-type FlatStep = { section: QcSection; checkpoint: QcCheckpoint; index: number; total: number };
+type FlatStep = { sectionName: string; label: string; index: number; total: number };
 
-/** The pending approval, whether it came from a live agent handoff or the
- *  offline conductor that stands in for the agent when no session is live. */
-type Approval = { source: "agent" | "local"; message: string; note: boolean };
+/** Pending approval — from a live agent handoff, or the offline conductor that
+ *  stands in for the agent when no session is connected. */
+type Approval = { source: "agent" | "local"; message: string };
 
 /**
- * Agent-driven field QC. Vantage guides the walkthrough and TAKES each photo
- * itself (control_camera / take_photo run in the browser); the inspector simply
- * holds the phone on what Vantage asks for. Every shot is signed off through the
- * agent's `handoff_to_user` approval — never a manual shutter.
- *
- * When no live session is connected, an offline conductor reproduces the same
- * capture → handoff → approve loop so the experience is fully demonstrable.
+ * Agent-driven field QC over the real Master Checklist. Vantage guides the
+ * walkthrough and captures each checkpoint (control_camera / take_photo), but
+ * the inspector can always take the shot themselves. Either way it's signed off
+ * through the agent's `handoff_to_user` approval.
  */
 export function QCFlow({
   agent,
-  stop,
+  task,
+  sections,
   onExit,
 }: {
   agent: LiveAgent;
-  stop: Stop;
+  task: Task;
+  sections: ChecklistSection[];
   onExit: () => void;
 }) {
+  const tone = toneFor(task.unitCode);
   const steps = useMemo<FlatStep[]>(() => {
-    const flat: { section: QcSection; checkpoint: QcCheckpoint }[] = [];
-    for (const section of stop.sections) {
-      for (const checkpoint of section.checkpoints) flat.push({ section, checkpoint });
+    const flat: { sectionName: string; label: string }[] = [];
+    for (const section of sections) {
+      for (const label of section.items) flat.push({ sectionName: section.name, label });
     }
     return flat.map((s, index) => ({ ...s, index, total: flat.length }));
-  }, [stop]);
+  }, [sections]);
 
   const [started, setStarted] = useState(false);
   const [stepIdx, setStepIdx] = useState(0);
@@ -54,12 +54,11 @@ export function QCFlow({
   const [done, setDone] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const step = steps[Math.min(stepIdx, steps.length - 1)];
+  const step = steps[Math.min(stepIdx, Math.max(0, steps.length - 1))];
   const connected = agent.status === "connected";
 
-  // A live agent handoff always wins; otherwise the offline conductor's prompt.
   const approval: Approval | null = agent.handoff
-    ? { source: "agent", message: agent.handoff.message, note: true }
+    ? { source: "agent", message: agent.handoff.message }
     : localApproval;
 
   const clearTimers = useCallback(() => {
@@ -67,14 +66,11 @@ export function QCFlow({
     timers.current = [];
   }, []);
 
-  // Camera on for the whole walkthrough so the agent can frame + snap.
   useEffect(() => {
     if (started) void agent.startCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started]);
 
-  // Release camera + pending timers only when the flow unmounts, so the
-  // offline conductor's scheduled handoff survives the `started` transition.
   useEffect(() => {
     return () => {
       clearTimers();
@@ -83,22 +79,19 @@ export function QCFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Offline conductor: stand in for the agent — "capture" the current
-  // checkpoint, then raise a handoff for approval, mirroring the live loop.
   const conduct = useCallback(
     (idx: number) => {
-      if (connected) return; // the real agent drives capture + handoff
+      if (connected) return;
       clearTimers();
       setCaptured(null);
       timers.current.push(
         setTimeout(() => {
           const frame = agent.getLatestFrame();
           setCaptured(frame ? `data:image/jpeg;base64,${frame}` : null);
-          const cp = steps[idx]?.checkpoint;
+          const label = steps[idx]?.label ?? "checkpoint";
           setLocalApproval({
             source: "local",
-            message: `I framed the ${cp?.label.toLowerCase() ?? "checkpoint"}. Approve to log it, or tell me what to change.`,
-            note: true,
+            message: `I framed “${label}”. Approve to log it, or tell me what to change.`,
           });
         }, 1400)
       );
@@ -107,11 +100,11 @@ export function QCFlow({
   );
 
   function begin() {
+    if (steps.length === 0) return;
     setStarted(true);
     if (connected) {
-      // Hand the walkthrough to the agent: it captures and hands off per shot.
       agent.submit({
-        text: `Start the QC walkthrough for ${stop.propertyName} (${stop.unitCode}). Guide me section by section, take each checkpoint photo yourself with the camera, and hand off to me to approve every shot before moving on.`,
+        text: `Start the QC walkthrough for ${task.name} (${task.unitCode}). Go section by section through the Master Checklist, take each checkpoint photo yourself with the camera, and hand off to me to approve every shot before moving on.`,
         files: [],
       });
     } else {
@@ -119,50 +112,69 @@ export function QCFlow({
     }
   }
 
+  function captureManually() {
+    clearTimers();
+    const ok = agent.snapPhoto();
+    const frame = agent.getLatestFrame();
+    setCaptured(ok && frame ? `data:image/jpeg;base64,${frame}` : null);
+    setLocalApproval({
+      source: "local",
+      message: `Here's your shot of “${step.label}”. Approve to log it, or re-shoot.`,
+    });
+  }
+
+  function advance() {
+    setLocalApproval(null);
+    setCaptured(null);
+    if (stepIdx + 1 >= steps.length) setDone(true);
+    else {
+      const next = stepIdx + 1;
+      setStepIdx(next);
+      if (!connected) conduct(next);
+    }
+  }
+
   function approve() {
     if (approval?.source === "agent") {
       agent.respondHandoff("Approved — that shot looks good. Log it and continue to the next checkpoint.");
-      setCaptured(null);
-      return;
+    } else if (connected) {
+      agent.submit({
+        text: `Approved — I captured “${step.label}” myself. Log this shot and continue to the next checkpoint.`,
+        files: [],
+      });
     }
-    // Offline: advance the conductor.
-    setLocalApproval(null);
-    setCaptured(null);
-    if (stepIdx + 1 >= steps.length) {
-      setDone(true);
-    } else {
-      const next = stepIdx + 1;
-      setStepIdx(next);
-      conduct(next);
-    }
+    advance();
   }
 
   function reshoot() {
-    const detail = note.trim() || "Please get closer and show the edge more clearly.";
+    const detail = note.trim() || "Please get closer and show the detail more clearly.";
     if (approval?.source === "agent") {
       agent.respondHandoff(`Re-shoot this one. ${detail}`);
+    } else if (connected) {
+      agent.submit({ text: `Let's re-shoot “${step.label}”. ${detail}`, files: [] });
     } else {
-      conduct(stepIdx); // re-frame the same checkpoint
+      conduct(stepIdx);
     }
     setNote("");
     setReshootOpen(false);
+    setLocalApproval(null);
     setCaptured(null);
   }
 
-  if (done) return <Complete stop={stop} onExit={onExit} />;
+  if (done) return <Complete task={task} sections={sections} onExit={onExit} />;
 
   return (
     <div className="on-forest flex min-h-0 flex-1 flex-col bg-forest-950 text-sage-200">
       <QCHeader step={step} started={started} onExit={onExit} />
 
       {!started ? (
-        <Intro stop={stop} steps={steps} onBegin={begin} />
+        <Intro task={task} sections={sections} steps={steps} onBegin={begin} />
       ) : (
         <Walkthrough
           agent={agent}
           step={step}
           captured={captured}
-          tone={stop.tone}
+          tone={tone}
           approval={approval}
           reshootOpen={reshootOpen}
           note={note}
@@ -171,6 +183,7 @@ export function QCFlow({
           onCloseReshoot={() => setReshootOpen(false)}
           onApprove={approve}
           onReshoot={reshoot}
+          onCapture={captureManually}
         />
       )}
     </div>
@@ -182,11 +195,12 @@ function QCHeader({
   started,
   onExit,
 }: {
-  step: FlatStep;
+  step: FlatStep | undefined;
   started: boolean;
   onExit: () => void;
 }) {
-  const pct = started ? (step.index / step.total) * 100 : 0;
+  const total = step?.total ?? 0;
+  const pct = started && step ? (step.index / Math.max(1, total)) * 100 : 0;
   return (
     <header className="px-5 pt-[max(1.25rem,env(safe-area-inset-top))]">
       <div className="flex items-center justify-between gap-2">
@@ -199,10 +213,10 @@ function QCHeader({
           <XIcon className="size-4" />
         </button>
         <Eyebrow className="truncate text-sage-400">
-          {started ? step.section.name : "Quality walkthrough"}
+          {started && step ? step.sectionName : "Quality walkthrough"}
         </Eyebrow>
         <span className="grid h-9 min-w-9 shrink-0 place-items-center rounded-xl bg-forest-800 px-2 text-sm font-medium text-sage-200">
-          {started ? `${step.index + 1}/${step.total}` : step.total}
+          {started && step ? `${step.index + 1}/${total}` : total}
         </span>
       </div>
       <div className="mt-3 h-1 overflow-hidden rounded-full bg-forest-800">
@@ -216,11 +230,13 @@ function QCHeader({
 }
 
 function Intro({
-  stop,
+  task,
+  sections,
   steps,
   onBegin,
 }: {
-  stop: Stop;
+  task: Task;
+  sections: ChecklistSection[];
   steps: FlatStep[];
   onBegin: () => void;
 }) {
@@ -229,19 +245,19 @@ function Intro({
       <div className="field-scroll px-6 pt-6">
         <CopilotOrb state="idle" size={128} className="mx-auto" />
         <h1 className="mt-6 text-center font-display text-[clamp(1.7rem,7vw,2.2rem)] leading-tight tracking-tight text-cream">
-          Vantage will walk {stop.propertyName} with you
+          Vantage will walk {task.name} with you
         </h1>
         <p className="muted mx-auto mt-2 max-w-sm text-center text-sm leading-relaxed text-sage-300">
           Hold your phone on what Vantage points out. It frames and captures each
-          shot — you just approve, or ask for a re-shoot. {steps.length} checkpoints
-          across {stop.sections.length} sections.
+          shot — or take it yourself anytime. You approve every shot before it's
+          logged. {steps.length} checkpoints across {sections.length} sections.
         </p>
 
         <ul className="mt-7 flex flex-col gap-1.5">
-          {stop.sections.map((section, i) => (
+          {sections.map((section, i) => (
             <li
               className="flex items-center gap-3 rounded-2xl border border-forest-800 bg-forest-900 px-4 py-3"
-              key={section.id}
+              key={section.name}
             >
               <span className="grid size-7 shrink-0 place-items-center rounded-full bg-forest-800 text-xs font-semibold text-gold-300">
                 {i + 1}
@@ -249,14 +265,15 @@ function Intro({
               <span className="min-w-0 flex-1 truncate text-sm text-sage-200">
                 {section.name}
               </span>
-              <span className="text-xs text-sage-400">{section.checkpoints.length}</span>
+              <span className="text-xs text-sage-400">{section.items.length}</span>
             </li>
           ))}
         </ul>
       </div>
       <div className="px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
         <button
-          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gold text-base font-semibold text-[#231a06] transition-colors hover:bg-gold-300"
+          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gold text-base font-semibold text-[#231a06] transition-colors hover:bg-gold-300 disabled:opacity-50"
+          disabled={steps.length === 0}
           onClick={onBegin}
           type="button"
         >
@@ -280,6 +297,7 @@ function Walkthrough({
   onCloseReshoot,
   onApprove,
   onReshoot,
+  onCapture,
 }: {
   agent: LiveAgent;
   step: FlatStep;
@@ -293,6 +311,7 @@ function Walkthrough({
   onCloseReshoot: () => void;
   onApprove: () => void;
   onReshoot: () => void;
+  onCapture: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -306,18 +325,13 @@ function Walkthrough({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {/* Guidance */}
       <div className="px-5 pt-5">
-        <Eyebrow className="text-gold-300">{step.section.name}</Eyebrow>
+        <Eyebrow className="text-gold-300">{step.sectionName}</Eyebrow>
         <h1 className="mt-1.5 font-display text-[clamp(1.4rem,6vw,1.9rem)] leading-tight tracking-tight text-cream">
-          {step.checkpoint.label}
+          {step.label}
         </h1>
-        {step.checkpoint.hint && (
-          <p className="muted mt-1 text-sm text-sage-300">{step.checkpoint.hint}</p>
-        )}
       </div>
 
-      {/* Viewfinder / captured frame */}
       <div className="relative mx-5 mt-4 min-h-0 flex-1 overflow-hidden rounded-3xl border border-forest-700 bg-forest-900">
         {captured ? (
           <img alt="Captured checkpoint" className="h-full w-full object-cover" src={captured} />
@@ -326,21 +340,14 @@ function Walkthrough({
         ) : (
           <PropertyTone tone={tone} className="h-full w-full" />
         )}
-
-        {/* Framing guides */}
         <div className="pointer-events-none absolute inset-4 rounded-2xl border border-white/12" />
 
-        {/* Live capture status — the agent is taking the shot, not the human */}
         {capturing && (
           <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 bg-gradient-to-t from-forest-950/90 to-transparent px-4 pb-4 pt-10">
             <CopilotOrb state={agent.micActive ? "listening" : "thinking"} size={40} />
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-cream">
-                Vantage is framing the shot…
-              </p>
-              <p className="truncate text-xs text-sage-300">
-                Hold steady on the {step.checkpoint.label.toLowerCase()}.
-              </p>
+              <p className="truncate text-sm font-medium text-cream">Vantage is framing the shot…</p>
+              <p className="truncate text-xs text-sage-300">Hold steady on “{step.label}”.</p>
             </div>
             <button
               aria-label={agent.micActive ? "Stop talking" : "Talk to Vantage"}
@@ -357,14 +364,22 @@ function Walkthrough({
         )}
       </div>
 
-      {/* Bottom rail while capturing */}
       {capturing && (
-        <p className="px-5 py-4 text-center text-xs text-sage-400">
-          Vantage captures each checkpoint and asks you to approve.
-        </p>
+        <div className="flex flex-col items-center gap-2 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+          <button
+            aria-label="Take the photo yourself"
+            className="grid size-[4.25rem] place-items-center rounded-full bg-white ring-4 ring-white/20 transition-transform active:scale-95"
+            onClick={onCapture}
+            type="button"
+          >
+            <span className="size-[3.4rem] rounded-full border-2 border-forest-950/15 bg-white" />
+          </button>
+          <p className="text-center text-xs text-sage-400">
+            Vantage captures automatically — or tap to take the shot yourself.
+          </p>
+        </div>
       )}
 
-      {/* Approval sheet — the agent's handoff_to_user, surfaced for sign-off */}
       {approval && (
         <ApprovalSheet
           approval={approval}
@@ -415,11 +430,11 @@ function ApprovalSheet({
               </span>
               <div className="min-w-0">
                 <h2 className="font-display text-xl leading-tight text-cream">Looking good?</h2>
-                <p className="muted mt-1 text-sm leading-relaxed text-sage-300">
-                  {approval.message}
-                </p>
+                <p className="muted mt-1 text-sm leading-relaxed text-sage-300">{approval.message}</p>
                 <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-forest-800 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-wider text-sage-300">
-                  Vantage · needs your approval
+                  {approval.source === "agent"
+                    ? "Vantage · needs your approval"
+                    : "Your capture · review to log"}
                 </p>
               </div>
             </div>
@@ -456,7 +471,7 @@ function ApprovalSheet({
               autoFocus
               className="mt-3 min-h-24 w-full rounded-2xl border border-forest-700 bg-forest-950 p-4 text-[0.95rem] leading-relaxed text-cream placeholder:text-sage-400 focus:outline-none"
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Get closer and show the edge of the range more clearly…"
+              placeholder="Get closer and show the detail more clearly…"
               value={note}
             />
             <div className="mt-3 flex gap-3">
@@ -478,7 +493,6 @@ function ApprovalSheet({
               </button>
             </div>
             <button
-              aria-label={agent.micActive ? "Stop talking" : "Speak the change"}
               className="mx-auto mt-3 flex items-center gap-2 text-sm text-sage-300 underline-offset-4 hover:underline"
               onClick={() => (agent.micActive ? void agent.stopMic() : void agent.startMic())}
               type="button"
@@ -493,8 +507,16 @@ function ApprovalSheet({
   );
 }
 
-function Complete({ stop, onExit }: { stop: Stop; onExit: () => void }) {
-  const total = stop.sections.reduce((n, s) => n + s.checkpoints.length, 0);
+function Complete({
+  task,
+  sections,
+  onExit,
+}: {
+  task: Task;
+  sections: ChecklistSection[];
+  onExit: () => void;
+}) {
+  const total = sections.reduce((n, s) => n + s.items.length, 0);
   return (
     <div className="on-forest flex min-h-0 flex-1 flex-col items-center justify-center bg-forest-950 px-8 text-center text-sage-200">
       <CopilotOrb state="speaking" size={140} />
@@ -503,12 +525,11 @@ function Complete({ stop, onExit }: { stop: Stop; onExit: () => void }) {
         <span className="eyebrow text-[#245c3a]">Walkthrough complete</span>
       </span>
       <h1 className="mt-4 font-display text-[clamp(1.8rem,8vw,2.3rem)] leading-tight tracking-tight text-cream">
-        {stop.propertyName} is guest-ready.
+        {task.name} is guest-ready.
       </h1>
       <p className="muted mt-2 max-w-xs text-sm leading-relaxed text-sage-300">
-        {total} checkpoints captured and approved across {stop.sections.length}{" "}
-        sections. Vantage compiled the readiness report — sign off to send it to
-        Dispatch.
+        {total} checkpoints captured and approved across {sections.length} sections.
+        Vantage compiled the readiness report — sign off to send it to Dispatch.
       </p>
       <button
         className="mt-8 h-14 w-full max-w-sm rounded-2xl bg-gold text-base font-semibold text-[#231a06] transition-colors hover:bg-gold-300"

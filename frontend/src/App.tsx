@@ -7,11 +7,11 @@ import { WorkspacePicker } from "@/views/mobile/WorkspacePicker";
 /**
  * Vantage field app — routing gate.
  *   no session        → SignIn
- *   session, no tenant → WorkspacePicker (multi-tenancy)
- *   session + tenant   → AppShell (My Day / Messages / AI Chat / Profile)
+ *   session, no cluster → WorkspacePicker (multi-tenancy: pick a field area)
+ *   session + cluster   → AppShell (My Day / Messages / AI Chat / Profile)
  */
 function Root() {
-  const { ready, user, workspaceId } = useAuth();
+  const { ready, email, clusterId } = useAuth();
 
   if (!ready) {
     return (
@@ -20,9 +20,9 @@ function Root() {
       </div>
     );
   }
-  if (!user) return <SignIn />;
-  if (!workspaceId) return <WorkspacePicker user={user} />;
-  return <AppShell workspaceId={workspaceId} />;
+  if (!email) return <SignIn />;
+  if (clusterId == null) return <WorkspacePicker email={email} />;
+  return <AppShell clusterId={clusterId} />;
 }
 
 const App = () => (

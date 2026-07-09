@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import type { Workspace } from "@/lib/tenancy";
 
 /** Tracked small-caps metadata label. */
 export function Eyebrow({
@@ -11,37 +10,6 @@ export function Eyebrow({
   className?: string;
 }) {
   return <p className={cn("eyebrow", className)}>{children}</p>;
-}
-
-/** Workspace monogram crest — an editorial stand-in for a brand mark. */
-export function WorkspaceCrest({
-  workspace,
-  size = 44,
-  className,
-}: {
-  workspace: Pick<Workspace, "initials" | "hue">;
-  size?: number;
-  className?: string;
-}) {
-  const { hue } = workspace;
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "grid shrink-0 place-items-center rounded-2xl font-display font-medium text-white",
-        className
-      )}
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.4,
-        background: `linear-gradient(145deg, hsl(${hue} 34% 34%), hsl(${hue} 42% 16%))`,
-        boxShadow: `inset 0 1px 0 hsl(${hue} 40% 55% / 0.5), 0 8px 18px -8px hsl(${hue} 40% 20% / 0.7)`,
-      }}
-    >
-      {workspace.initials}
-    </span>
-  );
 }
 
 /**

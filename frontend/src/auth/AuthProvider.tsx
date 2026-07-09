@@ -1,10 +1,10 @@
 /**
- * Auth + active-workspace context for the Vantage field app.
+ * Auth + active-cluster context for the Vantage field app.
  *
- * The branch has no auth backend yet, so this holds session state client-side
- * (localStorage) behind a small API — `signIn`, `signOut`, `selectWorkspace`.
- * Swapping in real endpoints later means changing only the bodies here; every
- * screen consumes the context, never storage directly.
+ * There is no auth backend on this branch, so the session (the signed-in email
+ * and the selected cluster/workspace) is held client-side. Everything the app
+ * then shows is fetched live from the real backend — the session only decides
+ * *who* is looking and *which cluster* they're scoped to.
  */
 
 import {
@@ -16,22 +16,22 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { USER, type FieldUser } from "@/lib/tenancy";
 
-const STORAGE_KEY = "vantage.session.v1";
+const STORAGE_KEY = "vantage.session.v2";
 
 type Session = {
-  user: FieldUser;
-  workspaceId: string | null;
+  email: string;
+  clusterId: number | null;
 };
 
 type AuthValue = {
   ready: boolean;
-  user: FieldUser | null;
-  workspaceId: string | null;
-  signIn: (email: string) => Promise<FieldUser>;
+  email: string | null;
+  clusterId: number | null;
+  signIn: (email: string) => Promise<void>;
   signOut: () => void;
-  selectWorkspace: (id: string) => void;
+  selectCluster: (id: number) => void;
+  clearCluster: () => void;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -64,14 +64,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string) => {
-    // Demo identity resolution — carries the entered email onto the seeded
-    // profile so the app feels personal. A real backend returns the user here.
-    const trimmed = email.trim().toLowerCase();
-    const user: FieldUser = trimmed ? { ...USER, email: trimmed } : USER;
-    const next: Session = { user, workspaceId: null };
+    const next: Session = { email: email.trim().toLowerCase(), clusterId: null };
     setSession(next);
     save(next);
-    return user;
   }, []);
 
   const signOut = useCallback(() => {
@@ -79,10 +74,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     save(null);
   }, []);
 
-  const selectWorkspace = useCallback((id: string) => {
+  const selectCluster = useCallback((id: number) => {
+    setSession((prev) => {
+      const next = { email: prev?.email ?? "", clusterId: id };
+      save(next);
+      return next;
+    });
+  }, []);
+
+  const clearCluster = useCallback(() => {
     setSession((prev) => {
       if (!prev) return prev;
-      const next = { ...prev, workspaceId: id };
+      const next = { ...prev, clusterId: null };
       save(next);
       return next;
     });
@@ -91,13 +94,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthValue>(
     () => ({
       ready,
-      user: session?.user ?? null,
-      workspaceId: session?.workspaceId ?? null,
+      email: session?.email ?? null,
+      clusterId: session?.clusterId ?? null,
       signIn,
       signOut,
-      selectWorkspace,
+      selectCluster,
+      clearCluster,
     }),
-    [ready, session, signIn, signOut, selectWorkspace]
+    [ready, session, signIn, signOut, selectCluster, clearCluster]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

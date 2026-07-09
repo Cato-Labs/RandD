@@ -228,6 +228,45 @@ async def get_inspectors() -> dict[str, Any]:
     return {"inspectors": await run_in_threadpool(list_inspectors)}
 
 
+# ── Field app (Vantage mobile) read endpoints — real data, additive only ─────
+
+
+@app.get("/api/field/clusters")
+async def field_clusters() -> dict[str, Any]:
+    from app.field_api import list_clusters
+
+    return {"clusters": await run_in_threadpool(list_clusters)}
+
+
+@app.get("/api/field/day")
+async def field_day(cluster: int | None = Query(default=None)) -> dict[str, Any]:
+    from app.field_api import list_day
+
+    return {"tasks": await run_in_threadpool(list_day, cluster)}
+
+
+@app.get("/api/field/property/{property_id}")
+async def field_property(property_id: int) -> dict[str, Any]:
+    from app.field_api import property_detail
+
+    detail = await run_in_threadpool(property_detail, property_id)
+    return detail or {}
+
+
+@app.get("/api/field/checklist")
+async def field_checklist() -> dict[str, Any]:
+    from app.field_api import checklist
+
+    return {"sections": await run_in_threadpool(checklist)}
+
+
+@app.get("/api/field/notifications")
+async def field_notifications() -> dict[str, Any]:
+    from app.field_api import list_notifications
+
+    return {"notifications": await run_in_threadpool(list_notifications)}
+
+
 @app.get("/api/workspace")
 async def get_workspace() -> dict[str, Any]:
     files = [
