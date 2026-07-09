@@ -1,0 +1,4 @@
+# Test-only dependencies (not installed on the production host).
+-r requirements.txt
+pytest>=8.0.0,<10.0.0
+httpx>=0.27.0,<1.0.0   # FastAPI TestClient transport
