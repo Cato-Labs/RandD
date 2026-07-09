@@ -136,6 +136,15 @@ sudo ln -sf /etc/nginx/sites-available/strqc /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl restart nginx
 
+echo "=== Backing up and migrating the database ==="
+if [ -f /var/www/strqc/str_qc.sqlite ]; then
+  cp /var/www/strqc/str_qc.sqlite "/var/www/strqc/str_qc.sqlite.bak-$(date +%s)"
+fi
+# Run from the backend dir so `app.migrate_runtime` imports resolve (same
+# context as the systemd WorkingDirectory). Ledger-guarded: applies 0003 once,
+# safe to run on every deploy.
+(cd /var/www/strqc/backend && /var/www/strqc/backend/venv/bin/python -m app.migrate_runtime --db-path /var/www/strqc/str_qc.sqlite)
+
 echo "=== 5. Configuring Systemd Service for Backend ==="
 cat << 'EOF' | sudo tee /etc/systemd/system/strqc-backend.service
 [Unit]
