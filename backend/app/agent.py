@@ -172,8 +172,14 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
     )
 
 
-def create_agent(mode: str, voice: str, provider: str = DEFAULT_PROVIDER) -> BidiAgent:
-    """Create one BidiAgent per connection, on the requested vended provider."""
+def create_agent(
+    mode: str, voice: str, provider: str = DEFAULT_PROVIDER, tenant_id: int | None = None
+) -> BidiAgent:
+    """Create one BidiAgent per connection, on the requested vended provider.
+
+    ``tenant_id`` is bound into the agent's session state so future DB-backed
+    tools stay tenant-scoped (read via ``ctx.agent.state.get("tenant_id")``).
+    """
     model = build_model(provider, mode, voice)
     return BidiAgent(
         model=model,
@@ -181,4 +187,5 @@ def create_agent(mode: str, voice: str, provider: str = DEFAULT_PROVIDER) -> Bid
         system_prompt=SYSTEM_PROMPT,
         name="RandD Live",
         description="Real-time Gemini Live meta-tooling agent (editor, shell, load_tool).",
+        state={"tenant_id": tenant_id},
     )

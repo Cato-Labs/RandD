@@ -405,14 +405,30 @@ async def websocket_endpoint(
     mode: str = Query("audio", pattern="^(audio|text)$"),
     voice: str = Query("Puck"),
     provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$"),
+    token: str = Query(...),
 ) -> None:
     """Drive one live session with the vendored bidi harness loop.
 
     ``BidiAgent.run`` owns the whole lifecycle: it starts the agent loop,
     supervises input/output tasks in the harness task group, executes tools
     concurrently, and tears everything down via ``stop_all``.
+
+    Authentication: a short-lived WS token (minted by ``/api/auth/ws-token``)
+    is required as a query param because browsers cannot set WS headers. It is
+    validated at accept() and its ``tenant_id`` is bound into the agent.
     """
     await websocket.accept()
+    # Validate the WS token before doing anything else; on failure reuse the
+    # existing bidi_error-to-browser + close pattern.
+    try:
+        claims = auth.verify_ws_token(token)
+        tenant_id = claims["tenant_id"]
+    except Exception:
+        await websocket.send_text(
+            json.dumps({"type": "bidi_error", "error": "unauthorized"})
+        )
+        await websocket.close()
+        return
     if not PROVIDERS.get(provider, {}).get("enabled", True):
         await websocket.send_text(
             json.dumps({"type": "bidi_error", "error": f"provider {provider!r} is disabled"})
@@ -422,10 +438,11 @@ async def websocket_endpoint(
     try:
         # Inside the try so construction failures (missing credentials, model
         # deps) reach the browser as bidi_error instead of a dead socket.
-        agent = create_agent(mode=mode, voice=voice, provider=provider)
+        agent = create_agent(mode=mode, voice=voice, provider=provider, tenant_id=tenant_id)
         await agent.run(
             inputs=[BidiWebSocketInput(websocket)],
             outputs=[BidiWebSocketOutput(websocket)],
+            invocation_state={"tenant_id": tenant_id},
         )
     except WebSocketDisconnect:
         pass
