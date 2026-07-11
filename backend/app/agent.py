@@ -5,13 +5,6 @@ from app import _vendor  # noqa: F401  (must run before strands.experimental.bid
 from strands.experimental.bidi.agent import BidiAgent
 from strands_tools import editor, environment, http_request, load_tool, mcp_client, shell
 
-# Human-in-the-loop approval for field QC (photo sign-off / re-shoot decisions).
-# Optional import so a strands_tools build without it never breaks agent startup;
-# when present, the frontend renders its prompt as the approval UI.
-try:  # pragma: no cover - availability depends on the installed strands_tools
-    from strands_tools import handoff_to_user as _handoff_to_user
-except Exception:  # noqa: BLE001
-    _handoff_to_user = None
 from strands_tools.slack import slack, slack_send_message
 from strands_google.google_auth import google_auth
 from strands_google.gmail_helpers import gmail_reply, gmail_send

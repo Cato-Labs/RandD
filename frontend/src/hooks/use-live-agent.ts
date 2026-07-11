@@ -71,9 +71,6 @@ export const useLiveAgent = () => {
   const [voices, setVoices] = useState<LiveVoice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
-  // Human-in-the-loop: the agent's strands `handoff_to_user` call, surfaced so
-  // the UI can render an approval prompt (field QC photo sign-off / re-shoot).
-  const [handoff, setHandoff] = useState<{ id: string; message: string } | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -420,15 +417,6 @@ export const useLiveAgent = () => {
             input?: unknown;
           };
           if (!toolUse.toolUseId || !toolUse.name) break;
-          // Human-in-the-loop approval: the agent's handoff_to_user call pauses
-          // for the inspector's sign-off. Surface its message as the approval UI.
-          if (toolUse.name === "handoff_to_user") {
-            const input = (toolUse.input ?? {}) as { message?: string };
-            setHandoff({
-              id: toolUse.toolUseId,
-              message: String(input.message ?? "Please review and approve to continue."),
-            });
-          }
           // The agent drives the browser camera through this tool.
           if (toolUse.name === "control_camera") {
             const action = String(
@@ -559,7 +547,6 @@ export const useLiveAgent = () => {
     socketRef.current = null;
     setStatus("disconnected");
     setChatStatus("ready");
-    setHandoff(null);
   }, []);
 
   const connect = useCallback(async () => {
@@ -823,24 +810,6 @@ export const useLiveAgent = () => {
     [submit]
   );
 
-  /**
-   * Resolve the agent's active handoff_to_user prompt: send the inspector's
-   * decision back as a user turn (approve / re-shoot + note) so the agent's
-   * human-in-the-loop resumes. Clears the pending handoff.
-   */
-  const respondHandoff = useCallback(
-    (decision: string) => {
-      const text = decision.trim();
-      if (text) {
-        appendUserMessage({ text, files: [] });
-        sendRaw({ type: "bidi_text_input", text, role: "user" });
-        setChatStatus("submitted");
-      }
-      setHandoff(null);
-    },
-    [appendUserMessage, sendRaw]
-  );
-
   const personaState: PersonaState = useMemo(() => {
     if (status !== "connected") return "asleep";
     if (speaking) return "speaking";
@@ -876,9 +845,6 @@ export const useLiveAgent = () => {
     usage,
     submit,
     retryUserMessage,
-    // human-in-the-loop approval (agent handoff_to_user)
-    handoff,
-    respondHandoff,
     // queue
     queue,
     cancelQueued,

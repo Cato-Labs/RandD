@@ -499,7 +499,7 @@ export const ChatThread = ({ agent }: { agent: LiveAgent }) => {
                 : "Connect to start a live text or voice session with the meta-tooling agent."
             }
             icon={<CheckCircleIcon className="size-8" />}
-            title="Vantage AI"
+            title="RandD Live"
           />
         )}
         {agent.messages.map((message) => (
