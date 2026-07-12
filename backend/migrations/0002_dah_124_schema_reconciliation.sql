@@ -70,6 +70,13 @@ BEGIN
       ON i.organization_id=p.organization_id AND i.id=p.inspection_id
     WHERE p.inspection_id IS NOT NULL AND (i.id IS NULL OR p.home_id<>i.home_id)
   ) THEN RAISE EXCEPTION 'DAH-124 preflight: photo inspection is missing or belongs to another home'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM photo
+    WHERE upload_status='verified' AND original_object_key !~ (
+      '^' || organization_id::text || '/' || home_id::text ||
+      '/originals/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.[A-Za-z0-9]+$'
+    )
+  ) THEN RAISE EXCEPTION 'DAH-124 preflight: verified photo has a non-canonical original object key'; END IF;
 END $preflight$;
 
 ALTER TABLE room DROP CONSTRAINT room_organization_id_creating_inspection_id_fkey;
@@ -97,6 +104,12 @@ ALTER TABLE photo ADD CONSTRAINT photo_asset_same_room_home_fk
 ALTER TABLE photo ADD CONSTRAINT photo_inspection_same_home_fk
   FOREIGN KEY (organization_id,home_id,inspection_id)
   REFERENCES inspection(organization_id,home_id,id);
+ALTER TABLE photo ADD CONSTRAINT photo_original_key_shape_check CHECK (
+  upload_status<>'verified' OR original_object_key ~ (
+    '^' || organization_id::text || '/' || home_id::text ||
+    '/originals/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.[A-Za-z0-9]+$'
+  )
+);
 
 ALTER TABLE inspection_inventory_link ADD COLUMN home_id uuid;
 ALTER TABLE inspection_inventory_link ADD COLUMN room_id uuid;

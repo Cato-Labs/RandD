@@ -34,6 +34,45 @@ jobs:
               print(f"parsed {migration.name}")
           PY
 
+  postgres-schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: vantage
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: vantage
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Migrate empty PostgreSQL database to head
+        run: |
+          for migration in backend/migrations/*.sql; do
+            echo "applying ${migration}"
+            psql --set ON_ERROR_STOP=1 --file "${migration}"
+          done
+
+      - name: Run DAH-124 PostgreSQL constraints and RLS acceptance
+        run: psql --set ON_ERROR_STOP=1 --file backend/tests/postgres/dah_124_acceptance.sql
+
   python:
     runs-on: ubuntu-latest
     steps:

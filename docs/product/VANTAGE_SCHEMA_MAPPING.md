@@ -3,7 +3,7 @@
 This is the handoff contract for DAH-125, DAH-126, DAH-127, and DAH-131. Migration `0001` remains unchanged; `0002` is the forward reconciliation.
 
 - 0001_sha256: `12c08d6cf03d49c0801155e3dfbe9adc7a3ae36d974270f793f4a7e3ac75cdaf`
-- 0002_sha256: `bb3ab3b6a2dd219602f470aa1a2c11bc4bb8273d0e7205e1dbd98a7792f40853`
+- 0002_sha256: `80a465916c6c5ee2127c9834be35fedbee32edc3509e4f02ab6fc96ad98a7151`
 
 ## Frozen mapping
 
@@ -36,4 +36,4 @@ The checked-in read-only audit (`backend/scripts/audit_legacy_housekeeping.py st
 
 ## Verification boundary
 
-The `canonical-schema` CI job runs the DAH-124 drift test, verifies both migration checksums and the exact 38-item Python/SQLite catalog, and parses every PostgreSQL migration with `pglast`. A real PostgreSQL execution was not available in this checkout because the local Docker daemon was not running; executable migration/RLS qualification remains a DAH-128 gate.
+The `canonical-schema` CI job runs the DAH-124 drift test, verifies both migration checksums and the exact 38-item Python/SQLite catalog, and parses every PostgreSQL migration with `pglast`. The `postgres-schema` job migrates a clean PostgreSQL 16 service to head and executes direct-SQL constraint and non-owner RLS acceptance. DAH-128 retains the broader production-adapter, pool-reuse, importer, and RDS qualification boundary.
