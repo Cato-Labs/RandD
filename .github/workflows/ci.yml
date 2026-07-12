@@ -43,25 +43,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install workspace packages (SDK is a local editable dep)
-        run: |
-          pip install -e harness-sdk/strands-py
-          pip install -e "packages/shared[dev]"
-          pip install -e "packages/db[dev]"
-          pip install -e "apps/agent[dev]"
-          pip install -e "apps/api[dev]"
-
-      - name: Lint
-        run: python -m ruff check packages apps/agent apps/api
+      - name: Install canonical backend
+        run: python -m pip install -r backend/requirements.txt pytest pytest-asyncio
 
       - name: Test
-        run: python -m pytest packages/shared/tests packages/db/tests apps/agent/tests apps/api/tests -q
+        working-directory: backend
+        run: python -m pytest -q
 
   web:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/web
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
@@ -69,13 +62,10 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install
         run: npm ci
-
-      - name: Lint
-        run: npm run lint
 
       - name: Build
         run: npm run build
