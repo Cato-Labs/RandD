@@ -1,9 +1,4 @@
-"""Canonical Vantage runtime wiring for the deployed FastAPI application.
-
-External Google/Gmail services fail explicitly when credentials are absent.
-The SQLite connection is an additive local/legacy compatibility store; the
-production schema and RLS policy live in ``backend/migrations`` for RDS.
-"""
+"""Canonical PostgreSQL Vantage runtime wiring for deployed FastAPI."""
 
 from __future__ import annotations
 
@@ -27,6 +22,7 @@ from .domain import VantageRepository
 from .google_day import GoogleCalendarService, GoogleNavigationService, GooglePlacesService
 from .google_http_clients import GoogleCalendarHttpClient, GooglePlacesHttpClient, GoogleRoutesHttpClient
 from .schema import install_sqlite_schema
+from .postgres import PostgresAdapter, PostgresConfig
 
 _ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_ORG_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "vantage:organization:big-bear"))
@@ -157,7 +153,7 @@ class RuntimeAuthorization:
 
 @dataclass
 class VantageRuntime:
-    repository: VantageRepository
+    repository: Any
     token_service: TokenService | None
     magic_codes: MagicCodeService | None
     authorization: RuntimeAuthorization
@@ -165,6 +161,18 @@ class VantageRuntime:
     places: GooglePlacesService
     navigation: GoogleNavigationService
     connect: Any
+    database: PostgresAdapter | None = None
+
+    def open(self) -> None:
+        if self.database is not None:
+            self.database.open()
+
+    def close(self) -> None:
+        if self.database is not None:
+            self.database.close()
+
+    def health(self) -> dict[str, object]:
+        return self.database.health() if self.database is not None else {"ready": False, "pool": {}}
 
     def memberships(self, email: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         with self.connect() as connection:
@@ -205,25 +213,9 @@ class VantageRuntime:
 
 
 def build_runtime() -> VantageRuntime:
-    raw_path = Path(os.getenv("VANTAGE_DB_PATH", "backend/workspace/vantage-v1.sqlite"))
-    db_path = raw_path if raw_path.is_absolute() else _ROOT / raw_path
-    legacy_raw = Path(os.getenv("STRQC_DB_PATH", "./str_qc.sqlite"))
-    legacy_path = legacy_raw if legacy_raw.is_absolute() else _ROOT / legacy_raw
-
-    def connect() -> sqlite3.Connection:
-        connection = sqlite3.connect(db_path)
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=5000")
-        return connection
-
-    with connect() as connection:
-        install_sqlite_schema(connection)
-    repository = VantageRepository(connect)
-    repository.bootstrap_organization(DEFAULT_ORG_ID, "Big Bear Operations", DEFAULT_PORTFOLIO_ID)
-    _sync_legacy_homes(connect, legacy_path)
-    for email in [item.strip().lower() for item in os.getenv("VANTAGE_ALLOWED_EMAILS", "").split(",") if item.strip()]:
-        user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"vantage:user:{email}"))
-        repository.bootstrap_user(user_id, email, DEFAULT_ORG_ID, "ORG_ADMIN")
+    database = PostgresAdapter(PostgresConfig.from_env())
+    connect = database.compatibility_connection
+    repository = database
 
     secret = os.getenv("VANTAGE_SESSION_SECRET", "").encode()
     token_service = TokenService(secret, SqlReplayStore(connect)) if len(secret) >= 32 else None
@@ -236,7 +228,7 @@ def build_runtime() -> VantageRuntime:
     return VantageRuntime(
         repository, token_service, magic_codes, authorization,
         GoogleCalendarService(calendar_client, authorization),
-        GooglePlacesService(places_client), GoogleNavigationService(routes_client, authorization), connect,
+        GooglePlacesService(places_client), GoogleNavigationService(routes_client, authorization), connect, database,
     )
 
 

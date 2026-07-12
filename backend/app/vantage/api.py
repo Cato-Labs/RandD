@@ -67,9 +67,10 @@ class UploadComplete(BaseModel):
 
 
 def _raise(error: DomainError) -> None:
-    status_code = status.HTTP_409_CONFLICT if isinstance(error, ConflictError) else (
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE if error.code in {"database_unavailable", "database_timeout"} else (
+        status.HTTP_409_CONFLICT if isinstance(error, ConflictError) else (
         status.HTTP_404_NOT_FOUND if error.code == "not_found" else status.HTTP_422_UNPROCESSABLE_ENTITY
-    )
+    ))
     raise HTTPException(status_code=status_code, detail={"error": {
         "code": error.code, "message": str(error), "retryable": error.retryable, "fields": error.fields,
     }}) from error
@@ -86,7 +87,7 @@ def _require_home_read(context: TenantContext, home_id: str) -> None:
 
 
 def create_vantage_router(
-    repository: VantageRepository,
+    repository: Any,
     context_dependency: Callable[..., TenantContext],
 ) -> APIRouter:
     """Build routes without global auth/database state.
@@ -97,23 +98,33 @@ def create_vantage_router(
     router = APIRouter(prefix="/api", tags=["vantage-v1"])
     Context = Annotated[TenantContext, Depends(context_dependency)]
 
+    def call(context: TenantContext, method: str, *args: Any, read_only: bool = False, **kwargs: Any) -> Any:
+        transaction = getattr(repository, "read_only_transaction" if read_only else "transaction", None)
+        if transaction is None:
+            return getattr(repository, method)(*args, **kwargs)
+        with transaction(context) as active:
+            return getattr(active, method)(*args, **kwargs)
+
     @router.get("/room-types")
     def room_types(context: Context) -> list[dict[str, Any]]:
-        return repository.list_room_types(context.organization_id)
+        try:
+            return call(context, "list_room_types", context.organization_id, read_only=True)
+        except DomainError as error:
+            _raise(error)
 
     @router.post("/inspections", status_code=201)
     def start_inspection(payload: InspectionCreate, context: Context) -> dict[str, Any]:
         _require_write(context)
         _require_home_read(context, payload.homeId)
         try:
-            return repository.start_inspection(context.organization_id, context.user_id, payload.homeId, payload.type, payload.clientId)
+            return call(context, "start_inspection", context.organization_id, context.user_id, payload.homeId, payload.type, payload.clientId)
         except DomainError as error:
             _raise(error)
 
     @router.get("/inspections/{inspection_id}")
     def get_inspection(inspection_id: str, context: Context) -> dict[str, Any]:
         try:
-            inspection = repository.get_inspection(context.organization_id, inspection_id)
+            inspection = call(context, "get_inspection", context.organization_id, inspection_id, read_only=True)
             _require_home_read(context, inspection["home_id"])
             return inspection
         except DomainError as error:
@@ -123,7 +134,7 @@ def create_vantage_router(
     def complete_inspection(inspection_id: str, context: Context) -> dict[str, Any]:
         _require_write(context)
         try:
-            return repository.complete_onboarding(context.organization_id, context.user_id, inspection_id)
+            return call(context, "complete_onboarding", context.organization_id, context.user_id, inspection_id)
         except DomainError as error:
             _raise(error)
 
@@ -131,7 +142,7 @@ def create_vantage_router(
     def rooms(home_id: str, context: Context) -> list[dict[str, Any]]:
         _require_home_read(context, home_id)
         try:
-            return repository.list_rooms(context.organization_id, home_id)
+            return call(context, "list_rooms", context.organization_id, home_id, read_only=True)
         except DomainError as error:
             _raise(error)
 
@@ -140,7 +151,7 @@ def create_vantage_router(
         _require_write(context)
         _require_home_read(context, home_id)
         try:
-            return repository.create_room(context.organization_id, context.user_id, home_id, payload.inspectionId, payload.roomTypeId, payload.name, payload.clientId or idempotency_key or "")
+            return call(context, "create_room", context.organization_id, context.user_id, home_id, payload.inspectionId, payload.roomTypeId, payload.name, payload.clientId or idempotency_key or "")
         except DomainError as error:
             _raise(error)
 
@@ -155,7 +166,7 @@ def create_vantage_router(
             "display_order": payload.displayOrder,
         }
         try:
-            return repository.update_room(
+            return call(context, "update_room",
                 context.organization_id,
                 context.user_id,
                 room_id,
@@ -168,16 +179,22 @@ def create_vantage_router(
     def archive_room(room_id: str, context: Context) -> dict[str, Any]:
         _require_write(context)
         try:
-            return repository.archive_room(context.organization_id, context.user_id, room_id)
+            return call(context, "archive_room", context.organization_id, context.user_id, room_id)
         except DomainError as error:
             _raise(error)
 
     @router.get("/rooms/{room_id}/assets")
     def assets(room_id: str, context: Context) -> list[dict[str, Any]]:
         try:
-            room = repository.get_room(context.organization_id, room_id)
-            _require_home_read(context, room["home_id"])
-            return repository.list_assets(context.organization_id, room_id)
+            transaction = getattr(repository, "read_only_transaction", None)
+            if transaction is None:
+                room = repository.get_room(context.organization_id, room_id)
+                _require_home_read(context, room["home_id"])
+                return repository.list_assets(context.organization_id, room_id)
+            with transaction(context) as active:
+                room = active.get_room(context.organization_id, room_id)
+                _require_home_read(context, room["home_id"])
+                return active.list_assets(context.organization_id, room_id)
         except DomainError as error:
             _raise(error)
 
@@ -185,7 +202,7 @@ def create_vantage_router(
     def create_asset(room_id: str, payload: AssetCreate, context: Context, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None) -> dict[str, Any]:
         _require_write(context)
         try:
-            return repository.create_asset(context.organization_id, context.user_id, room_id, payload.inspectionId, payload.assetType, payload.name, payload.clientId or idempotency_key or "")
+            return call(context, "create_asset", context.organization_id, context.user_id, room_id, payload.inspectionId, payload.assetType, payload.name, payload.clientId or idempotency_key or "")
         except DomainError as error:
             _raise(error)
 
@@ -198,9 +215,16 @@ def create_vantage_router(
             "condition": payload.condition, "condition_notes": payload.conditionNotes, "notes": payload.notes,
         }
         try:
-            if payload.roomId is not None:
-                repository.move_asset(context.organization_id, context.user_id, asset_id, payload.roomId)
-            return repository.update_asset(context.organization_id, context.user_id, asset_id, **{k: v for k, v in values.items() if v is not None})
+            transaction = getattr(repository, "transaction", None)
+            if transaction is None:
+                active = repository
+                if payload.roomId is not None:
+                    active.move_asset(context.organization_id, context.user_id, asset_id, payload.roomId)
+                return active.update_asset(context.organization_id, context.user_id, asset_id, **{k: v for k, v in values.items() if v is not None})
+            with transaction(context) as active:
+                if payload.roomId is not None:
+                    active.move_asset(context.organization_id, context.user_id, asset_id, payload.roomId)
+                return active.update_asset(context.organization_id, context.user_id, asset_id, **{k: v for k, v in values.items() if v is not None})
         except DomainError as error:
             _raise(error)
 
@@ -209,7 +233,7 @@ def create_vantage_router(
         _require_write(context)
         _require_home_read(context, payload.homeId)
         try:
-            return repository.create_photo_upload(context.organization_id, context.user_id, payload.homeId, payload.roomId, payload.assetId, payload.inspectionId, payload.clientId)
+            return call(context, "create_photo_upload", context.organization_id, context.user_id, payload.homeId, payload.roomId, payload.assetId, payload.inspectionId, payload.clientId)
         except DomainError as error:
             _raise(error)
 
