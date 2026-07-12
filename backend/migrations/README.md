@@ -22,3 +22,10 @@ verify its JSON summary and source counts, then cut over application reads.
 Historical House Keeping reports remain legacy records; the importer never
 invents room mappings. Rollback is application cutback to SQLite plus removal
 of the new PostgreSQL schema before production writes begin.
+
+`0006_dah_126_auth_function_rls_fix.sql` adds `vantage_auth_reader` (NOLOGIN,
+BYPASSRLS) as the owner of the two unauthenticated login-discovery functions
+(`auth_user_by_email`, `auth_active_memberships`). That role has SELECT only on
+`app_user`, `organization`, and `organization_membership`. Runtime and
+bootstrap login roles must not receive BYPASSRLS; only EXECUTE on those
+functions is granted to `vantage_auth_bootstrap`.

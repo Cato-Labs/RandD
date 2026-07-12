@@ -77,6 +77,7 @@ INSERT INTO expected_tenant_table VALUES
  ('claim_export','organization_id'),('video','organization_id'),('audit_event','organization_id'),
  ('inspection_item_result','organization_id'),('result_photo','organization_id'),
  ('legacy_inspection_report','organization_id');
+GRANT SELECT ON expected_tenant_table TO vantage_runtime;
 
 DO $catalog$
 BEGIN
@@ -137,7 +138,7 @@ BEGIN
   END;
   BEGIN
     EXECUTE format(
-      'INSERT INTO %s SELECT (json_populate_record(NULL::%s,to_jsonb(src)||jsonb_build_object(%L,$1))).* FROM %s src WHERE %I=$2 LIMIT 1',
+      'INSERT INTO %s SELECT (json_populate_record(NULL::%s,(to_jsonb(src)||jsonb_build_object(%L,$1))::json)).* FROM %s src WHERE %I=$2 LIMIT 1',
       target,target,tenant_column,target,tenant_column
     ) USING org_spoof,org_a;
     RAISE EXCEPTION '% accepted payload-spoofed tenant INSERT',target;
@@ -163,25 +164,25 @@ ROLLBACK;
 BEGIN;
 SELECT set_config('app.org_id','00000000-0000-0000-0000-000000000001',true);
 SELECT set_config('app.user_id','00000000-0000-0000-0000-000000000011',true);
-SELECT CASE WHEN count(*)>0 THEN 1 ELSE 1/0 END FROM home;
+SELECT CASE WHEN count(*)>0 THEN 1 ELSE 1/(SELECT 0) END FROM home;
 COMMIT;
 BEGIN;
-SELECT CASE WHEN count(*)=0 THEN 1 ELSE 1/0 END FROM home;
+SELECT CASE WHEN count(*)=0 THEN 1 ELSE 1/(SELECT 0) END FROM home;
 ROLLBACK;
 BEGIN;
 SELECT set_config('app.org_id','00000000-0000-0000-0000-000000000001',true);
-SELECT CASE WHEN count(*)=0 THEN 1 ELSE 1/0 END FROM home;
+SELECT CASE WHEN count(*)=0 THEN 1 ELSE 1/(SELECT 0) END FROM home;
 ROLLBACK;
 BEGIN;
 SELECT set_config('app.org_id','00000000-0000-0000-0000-000000000002',true);
 SELECT set_config('app.user_id','00000000-0000-0000-0000-000000000012',true);
-SELECT CASE WHEN count(*)>0 AND bool_and(organization_id='00000000-0000-0000-0000-000000000002') THEN 1 ELSE 1/0 END FROM home;
+SELECT CASE WHEN count(*)>0 AND bool_and(organization_id='00000000-0000-0000-0000-000000000002') THEN 1 ELSE 1/(SELECT 0) END FROM home;
 ROLLBACK;
 
 RESET ROLE;
 SET ROLE vantage_auth_bootstrap;
-SELECT CASE WHEN count(*)=1 THEN 1 ELSE 1/0 END FROM auth_user_by_email('a@example.com');
-SELECT CASE WHEN count(*)=1 THEN 1 ELSE 1/0 END FROM auth_active_memberships('00000000-0000-0000-0000-000000000011');
+SELECT CASE WHEN count(*)=1 THEN 1 ELSE 1/(SELECT 0) END FROM auth_user_by_email('a@example.com');
+SELECT CASE WHEN count(*)=1 THEN 1 ELSE 1/(SELECT 0) END FROM auth_active_memberships('00000000-0000-0000-0000-000000000011');
 DO $bootstrap_denied$
 BEGIN
   BEGIN PERFORM count(*) FROM home;

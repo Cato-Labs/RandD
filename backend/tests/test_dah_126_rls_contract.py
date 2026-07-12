@@ -93,3 +93,19 @@ def test_migration_freezes_roles_policies_and_auth_bootstrap_surface() -> None:
     assert "app_user_id() IS NOT NULL" in sql
     assert "SECURITY DEFINER SET search_path=pg_catalog" in sql
     assert "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.home TO vantage_auth_bootstrap" not in sql
+
+
+def test_auth_reader_migration_freezes_bootstrap_bypass_contract() -> None:
+    """DAH-112/0006: membership discovery must work under FORCE RLS without tenant GUCs."""
+    root = Path(__file__).resolve().parents[2]
+    sql = (root / "backend/migrations/0006_dah_126_auth_function_rls_fix.sql").read_text()
+    assert "CREATE ROLE vantage_auth_reader" in sql
+    assert "BYPASSRLS" in sql
+    assert "NOLOGIN" in sql
+    assert "OWNER TO vantage_auth_reader" in sql
+    assert "GRANT SELECT ON TABLE public.app_user TO vantage_auth_reader" in sql
+    assert "GRANT SELECT ON TABLE public.organization_membership TO vantage_auth_reader" in sql
+    assert "GRANT SELECT ON TABLE public.organization TO vantage_auth_reader" in sql
+    assert "GRANT EXECUTE ON FUNCTION public.auth_active_memberships(uuid) TO vantage_auth_bootstrap" in sql
+    assert "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.home TO vantage_auth_bootstrap" not in sql
+    assert "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.organization_membership TO vantage_auth_bootstrap" not in sql
