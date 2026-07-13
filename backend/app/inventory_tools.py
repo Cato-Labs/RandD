@@ -1,93 +1,270 @@
-"""Provider-neutral agent operations over an authorization-aware repository."""
+"""Session-bound Strands tools over the existing Vantage repositories."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
+
+from strands import tool
+
+from app.vantage.context import TenantContext
+from app.vantage.domain import DomainError
 
 
-@dataclass(frozen=True)
-class ToolContext:
-    org_id: str
-    user_id: str
-    roles: frozenset[str]
-    home_id: str
-    inspection_id: str
-    session_id: str
+WRITE_ROLES = ("ORG_ADMIN", "PROPERTY_MANAGER", "INSPECTOR")
 
 
-class InventoryRepository(Protocol):
-    async def list_room_types(self, context: ToolContext) -> Any: ...
-    async def list_rooms(self, context: ToolContext) -> Any: ...
-    async def create_room(self, context: ToolContext, payload: dict, idempotency_key: str) -> Any: ...
+def _error(error: DomainError) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": {
+            "code": error.code,
+            "message": str(error),
+            "retryable": error.retryable,
+            "fields": error.fields,
+        },
+    }
 
 
-class TransientRepositoryError(RuntimeError):
-    """Repository/network failure that is safe for the caller to retry."""
+def build_inventory_tools(repository: Any, context: TenantContext) -> list[Any]:
+    """Build tools whose tenant identity comes only from the verified session."""
 
-
-class AgentInventoryService:
-    """Thin tool boundary; repositories remain responsible for entity ownership checks."""
-
-    def __init__(self, repository: InventoryRepository) -> None:
-        self.repository = repository
-
-    @staticmethod
-    def _error(code: str, message: str, *, retryable: bool = False,
-               fields: dict[str, str] | None = None) -> dict:
-        return {"ok": False, "error": {"code": code, "message": message,
-                                         "retryable": retryable, "fields": fields or {}}}
-
-    @staticmethod
-    def _valid(context: ToolContext) -> bool:
-        return all((context.org_id, context.user_id, context.home_id,
-                    context.inspection_id, context.session_id))
-
-    async def _call(self, context: ToolContext, method: str, *args: Any) -> dict:
-        if not self._valid(context):
-            return self._error("authorization_context_missing", "Authenticated tool context is required")
+    def call(method: str, *args: Any, read_only: bool = False, **kwargs: Any) -> Any:
+        if not read_only and not context.has_role(*WRITE_ROLES):
+            return _error(DomainError("forbidden", "This role has read-only access"))
+        transaction = getattr(
+            repository,
+            "read_only_transaction" if read_only else "transaction",
+            None,
+        )
         try:
-            result = await getattr(self.repository, method)(context, *args)
-            return {"ok": True, "data": result}
-        except PermissionError as exc:
-            return self._error("forbidden", str(exc))
-        except (ValueError, KeyError) as exc:
-            return self._error("invalid_reference", str(exc))
-        except (TransientRepositoryError, TimeoutError, ConnectionError) as exc:
-            return self._error("temporarily_unavailable", str(exc), retryable=True)
+            if transaction is None:
+                return getattr(repository, method)(*args, **kwargs)
+            with transaction(context) as active:
+                return getattr(active, method)(*args, **kwargs)
+        except DomainError as error:
+            return _error(error)
 
-    async def list_room_types(self, context: ToolContext) -> dict:
-        return await self._call(context, "list_room_types")
+    @tool
+    def list_portfolios() -> Any:
+        """List portfolios in the inspector's active organization."""
+        return call("list_portfolios", context.organization_id, read_only=True)
 
-    async def list_rooms(self, context: ToolContext) -> dict:
-        return await self._call(context, "list_rooms")
+    @tool
+    def create_portfolio(name: str, client_id: str) -> Any:
+        """Create a replay-safe portfolio in the active organization."""
+        return call(
+            "create_portfolio",
+            context.organization_id,
+            context.user_id,
+            name,
+            client_id,
+        )
 
-    async def create_room(self, context: ToolContext, payload: dict,
-                          idempotency_key: str) -> dict:
-        if not idempotency_key or not payload.get("client_id"):
-            return self._error("idempotency_required", "client_id and idempotency key are required")
-        return await self._call(context, "create_room", payload, idempotency_key)
+    @tool
+    def create_home(
+        portfolio_id: str,
+        name: str,
+        client_id: str,
+        unit_code: str = "",
+        formatted_address: str = "",
+    ) -> Any:
+        """Create a home inside an existing portfolio."""
+        return call(
+            "create_home",
+            context.organization_id,
+            context.user_id,
+            portfolio_id,
+            name,
+            client_id,
+            unit_code=unit_code or None,
+            formatted_address=formatted_address or None,
+        )
 
-    async def invoke(self, operation: str, context: ToolContext, **kwargs: Any) -> dict:
-        """Extensible structured bridge for the remaining repository operations."""
-        allowed = {
-            "update_room", "archive_room", "create_asset", "update_asset", "move_asset",
-            "attach_original_photo", "find_duplicate_assets", "record_research_result",
-            "mark_low_confidence_value", "get_inspection_state", "save_walkthrough_progress",
-            "complete_onboarding_assessment",
+    @tool
+    def start_onboarding_inspection(home_id: str, client_id: str) -> Any:
+        """Start a replay-safe onboarding inspection for a home."""
+        return call(
+            "start_inspection",
+            context.organization_id,
+            context.user_id,
+            home_id,
+            "onboarding",
+            client_id,
+        )
+
+    @tool
+    def list_room_types() -> Any:
+        """List the fixed room and outdoor-area catalog."""
+        return call("list_room_types", context.organization_id, read_only=True)
+
+    @tool
+    def list_rooms(home_id: str) -> Any:
+        """List active rooms belonging to a home."""
+        return call("list_rooms", context.organization_id, home_id, read_only=True)
+
+    @tool
+    def create_room(
+        home_id: str,
+        room_type_id: str,
+        name: str,
+        client_id: str,
+        inspection_id: str = "",
+    ) -> Any:
+        """Create a room or outdoor area in a home."""
+        return call(
+            "create_room",
+            context.organization_id,
+            context.user_id,
+            home_id,
+            inspection_id or None,
+            room_type_id,
+            name,
+            client_id,
+        )
+
+    @tool
+    def update_room(
+        room_id: str,
+        name: str = "",
+        room_type_id: str = "",
+        floor_area: str = "",
+        notes: str = "",
+        display_order: int | None = None,
+    ) -> Any:
+        """Update supplied room fields."""
+        values = {
+            "name": name or None,
+            "room_type_id": room_type_id or None,
+            "floor_area": floor_area or None,
+            "notes": notes or None,
+            "display_order": display_order,
         }
-        if operation not in allowed:
-            return self._error("unknown_operation", f"Unsupported operation: {operation}")
-        mutating = allowed - {"find_duplicate_assets", "get_inspection_state"}
-        if operation in mutating:
-            client_id = kwargs.pop("client_id", None)
-            idempotency_key = kwargs.pop("idempotency_key", None)
-            if not client_id or not idempotency_key:
-                return self._error(
-                    "idempotency_required",
-                    "client_id and idempotency_key are required for mutating operations",
-                    fields={"client_id": "required", "idempotency_key": "required"},
-                )
-            kwargs["client_id"] = client_id
-            return await self._call(context, operation, kwargs, idempotency_key)
-        return await self._call(context, operation, kwargs)
+        return call(
+            "update_room",
+            context.organization_id,
+            context.user_id,
+            room_id,
+            **{key: value for key, value in values.items() if value is not None},
+        )
+
+    @tool
+    def create_asset(
+        room_id: str,
+        client_id: str,
+        asset_type: str = "",
+        name: str = "",
+        inspection_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        """Create an asset in a room with optional full metadata."""
+        return call(
+            "create_asset",
+            context.organization_id,
+            context.user_id,
+            room_id,
+            inspection_id or None,
+            asset_type,
+            name,
+            client_id,
+            **(metadata or {}),
+        )
+
+    @tool
+    def update_asset(asset_id: str, changes: dict[str, Any]) -> Any:
+        """Update any supported asset metadata fields."""
+        return call(
+            "update_asset",
+            context.organization_id,
+            context.user_id,
+            asset_id,
+            **changes,
+        )
+
+    @tool
+    def move_asset(asset_id: str, target_room_id: str) -> Any:
+        """Move an asset to another room in the same home."""
+        return call(
+            "move_asset",
+            context.organization_id,
+            context.user_id,
+            asset_id,
+            target_room_id,
+        )
+
+    @tool
+    def record_asset_document(
+        asset_id: str,
+        kind: str,
+        photo_id: str = "",
+        source_url: str = "",
+    ) -> Any:
+        """Link a verified receipt/warranty photo or an online document to an asset."""
+        return call(
+            "record_asset_document",
+            context.organization_id,
+            asset_id,
+            kind,
+            photo_id=photo_id or None,
+            source_url=source_url or None,
+        )
+
+    @tool
+    def list_asset_documents(asset_id: str) -> Any:
+        """List documents attached to an asset."""
+        return call(
+            "list_asset_documents",
+            context.organization_id,
+            asset_id,
+            read_only=True,
+        )
+
+    @tool
+    def record_asset_research_value(
+        asset_id: str,
+        field_name: str,
+        value: Any,
+        provenance: str,
+        source_reference: str = "",
+        confidence: float | None = None,
+        confirmed: bool = False,
+    ) -> Any:
+        """Record one observed, extracted, user-entered, or researched asset fact."""
+        return call(
+            "record_asset_research_value",
+            context.organization_id,
+            asset_id,
+            field_name=field_name,
+            value=value,
+            provenance=provenance,
+            source_reference=source_reference or None,
+            confidence=confidence,
+            confirmed=confirmed,
+        )
+
+    @tool
+    def list_asset_research_values(asset_id: str) -> Any:
+        """List provenance-bearing facts recorded for an asset."""
+        return call(
+            "list_asset_research_values",
+            context.organization_id,
+            asset_id,
+            read_only=True,
+        )
+
+    return [
+        list_portfolios,
+        create_portfolio,
+        create_home,
+        start_onboarding_inspection,
+        list_room_types,
+        list_rooms,
+        create_room,
+        update_room,
+        create_asset,
+        update_asset,
+        move_asset,
+        record_asset_document,
+        list_asset_documents,
+        record_asset_research_value,
+        list_asset_research_values,
+    ]

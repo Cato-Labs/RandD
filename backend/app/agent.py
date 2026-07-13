@@ -3,7 +3,15 @@ from typing import Any
 
 from app import _vendor  # noqa: F401  (must run before strands.experimental.bidi imports)
 from strands.experimental.bidi.agent import BidiAgent
-from strands_tools import editor, environment, http_request, load_tool, mcp_client, shell
+from strands_tools import editor, load_tool, mcp_client, shell
+from strands_tools.batch import batch
+from strands_tools.environment import environment
+from strands_tools.graph import graph
+from strands_tools.http_request import http_request
+from strands_tools.image_reader import image_reader
+from strands_tools.swarm import swarm
+from strands_tools.use_agent import use_agent
+from strands_tools.workflow import workflow
 
 from strands_tools.slack import slack, slack_send_message
 from strands_google.google_auth import google_auth
@@ -88,16 +96,33 @@ TOOLS = [
     list_walkthrough_videos,
     # YOLO object detection over the device-camera stream
     yolo_vision,
-]
-
-# Arbitrary code, environment, dynamic loading, and MCP passthrough are never
-# exposed to field roles. They exist only for an explicitly enabled, sandboxed
-# platform-admin development profile.
-ADMIN_TOOLS = [
-    editor.editor, shell.shell, load_tool.load_tool, list_library_tools,
-    mcp_client.mcp_client, http_request, environment, slack, slack_send_message,
-    send_report_to_slack, use_google, google_auth, gmail_send, gmail_reply,
-    gmail_send_with_attachments, send_video_to_slack, archive_inspection_report,
+    # Runtime: code, files, environment, dynamic tool discovery, MCP, network
+    editor.editor,
+    shell.shell,
+    load_tool.load_tool,
+    list_library_tools,
+    mcp_client.mcp_client,
+    http_request,
+    environment,
+    # Visual inspection for screenshots produced by the session's browser tool.
+    image_reader,
+    # Multi-agent formations
+    use_agent,
+    batch,
+    workflow,
+    swarm,
+    graph,
+    # Delivery and Google integrations
+    slack,
+    slack_send_message,
+    send_report_to_slack,
+    use_google,
+    google_auth,
+    gmail_send,
+    gmail_reply,
+    gmail_send_with_attachments,
+    send_video_to_slack,
+    archive_inspection_report,
     save_site_memory,
 ]
 
@@ -166,12 +191,18 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
     )
 
 
-def create_agent(mode: str, voice: str, provider: str = DEFAULT_PROVIDER, *, privileged: bool = False) -> BidiAgent:
+def create_agent(
+    mode: str,
+    voice: str,
+    provider: str = DEFAULT_PROVIDER,
+    *,
+    session_tools: list[Any] | None = None,
+) -> BidiAgent:
     """Create one BidiAgent per connection, on the requested vended provider."""
     model = build_model(provider, mode, voice)
     return BidiAgent(
         model=model,
-        tools=TOOLS + (ADMIN_TOOLS + memory_tools() if privileged else []),
+        tools=TOOLS + list(session_tools or ()) + memory_tools(),
         system_prompt=SYSTEM_PROMPT,
         name="Vantage AI",
         description="Tenant-scoped real-time field operations and property inspection agent.",

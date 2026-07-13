@@ -102,7 +102,8 @@ def test_defaults_enums_and_required_relationships(store) -> None:
     assert inspection["inspection_type"] == "turnover" and inspection["status"] == "draft"
     assert photo["purpose"] == "asset_original" and photo["upload_status"] == "pending"
     assert set(PHOTO_PURPOSES) == {
-        "asset_original", "inspection_evidence", "maintenance_before", "maintenance_after", "owner_report"
+        "asset_original", "inspection_evidence", "maintenance_before", "maintenance_after",
+        "owner_report", "asset_document",
     }
     with sqlite3.connect(path) as connection, pytest.raises(sqlite3.IntegrityError):
         connection.execute(

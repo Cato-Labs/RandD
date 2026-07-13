@@ -110,7 +110,7 @@ const App = () => {
           onClose={() => setDockOpen(false)}
           open={dockOpen}
         />
-        {agentPanelOpen && <AgentPanel agent={agent} />}
+        {(agentPanelOpen || agent.browserSession) && <AgentPanel agent={agent} />}
       </div>
     </div>
   );

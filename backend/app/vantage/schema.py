@@ -6,6 +6,10 @@ import re
 ROOM_TYPES = (
     "Bedroom", "Bathroom", "Common Area", "Game Room", "Dock Area", "Pool",
     "Casita / Guest House", "Basement", "Kitchen", "Other",
+    "Front Yard", "Back Yard", "Garage", "Deck / Patio", "Driveway",
+    "Laundry Room", "Office", "Attic", "Storage", "Deck", "Porch",
+    "Boat Deck", "Living Room", "Hallway", "Family Room", "Sun Room",
+    "Library", "Theater", "Pantry", "Walk-in Closet",
 )
 
 INSPECTION_TYPES = ("onboarding", "turnover")
@@ -16,6 +20,7 @@ PHOTO_PURPOSES = (
     "maintenance_before",
     "maintenance_after",
     "owner_report",
+    "asset_document",
 )
 
 # Stable storage keys for the exact 38 labels exported by app.qc_journal.
@@ -77,9 +82,15 @@ CREATE TABLE IF NOT EXISTS organization (
 );
 CREATE TABLE IF NOT EXISTS portfolio (
   id TEXT NOT NULL, organization_id TEXT NOT NULL, name TEXT NOT NULL,
+  created_by TEXT, client_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (organization_id, id),
-  FOREIGN KEY (organization_id) REFERENCES organization(id)
+  UNIQUE (organization_id, name),
+  FOREIGN KEY (organization_id) REFERENCES organization(id),
+  FOREIGN KEY (created_by) REFERENCES app_user(id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS portfolio_replay_unique
+  ON portfolio(organization_id,created_by,client_id)
+  WHERE created_by IS NOT NULL AND client_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS app_user (
   id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1
 );
@@ -92,10 +103,15 @@ CREATE TABLE IF NOT EXISTS home (
   organization_id TEXT NOT NULL, id TEXT NOT NULL, portfolio_id TEXT NOT NULL, name TEXT NOT NULL, unit_code TEXT,
   lifecycle_state TEXT NOT NULL DEFAULT 'active', legacy_property_id TEXT, google_place_id TEXT,
   formatted_address TEXT, latitude REAL, longitude REAL, places_validated_at TEXT,
+  created_by TEXT, client_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (organization_id, id),
-  FOREIGN KEY (organization_id, portfolio_id) REFERENCES portfolio(organization_id, id)
+  FOREIGN KEY (organization_id, portfolio_id) REFERENCES portfolio(organization_id, id),
+  FOREIGN KEY (created_by) REFERENCES app_user(id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS home_replay_unique
+  ON home(organization_id,created_by,client_id)
+  WHERE created_by IS NOT NULL AND client_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS google_calendar_connection (
   organization_id TEXT NOT NULL, user_id TEXT NOT NULL, calendar_id TEXT NOT NULL,
   encrypted_refresh_token TEXT, status TEXT NOT NULL DEFAULT 'connected', sync_token TEXT, synced_at TEXT,
@@ -174,7 +190,7 @@ CREATE TABLE IF NOT EXISTS photo (
   FOREIGN KEY (organization_id, home_id, room_id) REFERENCES room(organization_id, home_id, id),
   FOREIGN KEY (organization_id, home_id, room_id, asset_id) REFERENCES asset(organization_id, home_id, room_id, id),
   FOREIGN KEY (organization_id, home_id, inspection_id) REFERENCES inspection(organization_id, home_id, id),
-  CHECK (purpose IN ('asset_original','inspection_evidence','maintenance_before','maintenance_after','owner_report')),
+  CHECK (purpose IN ('asset_original','inspection_evidence','maintenance_before','maintenance_after','owner_report','asset_document')),
   CHECK (asset_id IS NULL OR room_id IS NOT NULL),
   CHECK (upload_status IN ('pending','verified','failed','abandoned')),
   CHECK (upload_status != 'verified' OR (original_object_key IS NOT NULL AND sha256 IS NOT NULL AND byte_size IS NOT NULL AND mime_type IS NOT NULL))
@@ -268,10 +284,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS evidence_approval_asset_only_unique
 CREATE UNIQUE INDEX IF NOT EXISTS evidence_approval_legacy_unique
   ON evidence_approval(organization_id,inspection_id,photo_id,legacy_item_id)
   WHERE result_id IS NULL AND asset_id IS NULL AND legacy_item_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS asset_document (
+  organization_id TEXT NOT NULL, id TEXT NOT NULL, asset_id TEXT NOT NULL,
+  kind TEXT NOT NULL, object_key TEXT, source_url TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (organization_id,id),
+  FOREIGN KEY (organization_id,asset_id) REFERENCES asset(organization_id,id),
+  CHECK (kind IN ('receipt','warranty','manual','product_page','other')),
+  CHECK ((object_key IS NOT NULL AND source_url IS NULL)
+      OR (object_key IS NULL AND source_url IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS asset_document_object_unique
+  ON asset_document(organization_id,asset_id,kind,object_key)
+  WHERE object_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS asset_document_source_unique
+  ON asset_document(organization_id,asset_id,kind,source_url)
+  WHERE source_url IS NOT NULL;
 CREATE TABLE IF NOT EXISTS asset_research_value (
   organization_id TEXT NOT NULL, id TEXT NOT NULL, asset_id TEXT NOT NULL, field_name TEXT NOT NULL, value_json TEXT NOT NULL,
   provenance TEXT NOT NULL, source_reference TEXT, retrieved_at TEXT, confidence REAL, confirmed INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (organization_id, id), FOREIGN KEY (organization_id, asset_id) REFERENCES asset(organization_id, id)
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (organization_id, id), FOREIGN KEY (organization_id, asset_id) REFERENCES asset(organization_id, id),
+  CHECK (provenance IN ('user_entered','agent_observed','photo_extracted','externally_researched')),
+  CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
+  CHECK (confirmed IN (0,1))
 );
 CREATE TABLE IF NOT EXISTS magic_code_challenge (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, code_hash TEXT NOT NULL, salt TEXT NOT NULL,

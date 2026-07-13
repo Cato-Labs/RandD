@@ -46,9 +46,11 @@ class BidiWebSocketInput:
         websocket: WebSocket,
         *,
         approval_resolver: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        browser_control_resolver: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self._websocket = websocket
         self._approval_resolver = approval_resolver
+        self._browser_control_resolver = browser_control_resolver
 
     async def start(self, agent: Any) -> None:  # noqa: ANN401 (protocol signature)
         return
@@ -71,6 +73,10 @@ class BidiWebSocketInput:
             if event_type == "approval_resolved":
                 if self._approval_resolver is not None:
                     await self._approval_resolver(data)
+                continue
+            if event_type == "browser_control":
+                if self._browser_control_resolver is not None:
+                    await self._browser_control_resolver(data)
                 continue
             if event_type == "camera_capture":
                 encoded = data.get("dataUrl")

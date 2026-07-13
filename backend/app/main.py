@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +14,14 @@ from fastapi.responses import JSONResponse
 from strands.tools.registry import ToolRegistry
 
 from app.agent import DEFAULT_MODEL_ID, DEFAULT_PROVIDER, PROVIDERS, TOOLS, create_agent
+from app.agentcore_browser import LiveViewAgentCoreBrowser
 from app import browser_camera
+from app.inventory_tools import build_inventory_tools
 from app.io import BidiWebSocketInput, BidiWebSocketOutput
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
+from app.perplexity_agent import perplexity_agent
+from app.smarty_mcp import SmartyMCPConfigurationError, create_smarty_mcp_client
 from app.transcribe import compress_clip, measure_loudness, transcribe_audio
 from app.approval_registry import ApprovalRegistry, ApprovalResolution
 from app.approval_tools import approval_scope
@@ -354,7 +360,15 @@ async def websocket_endpoint(
         # Inside the try so construction failures (missing credentials, model
         # deps) reach the browser as bidi_error instead of a dead socket.
         def emit_approval(event: dict[str, Any]) -> None:
-            __import__("asyncio").create_task(websocket.send_text(json.dumps(event, default=str)))
+            asyncio.create_task(websocket.send_text(json.dumps(event, default=str)))
+
+        loop = asyncio.get_running_loop()
+
+        def emit_browser(event: dict[str, Any]) -> None:
+            payload = json.dumps(event, default=str)
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(websocket.send_text(payload))
+            )
 
         def associate_approval(request, resolution) -> dict[str, str]:
             return VANTAGE.repository.associate_approved_evidence(
@@ -384,16 +398,52 @@ async def websocket_endpoint(
                     "error": str(exc),
                 }))
 
-        privileged = context.has_role("ORG_ADMIN") and os.getenv("VANTAGE_PLATFORM_ADMIN_TOOLS", "false").lower() in {"1", "true", "yes"}
-        agent = create_agent(mode=mode, voice=voice, provider=provider, privileged=privileged)
-        with browser_camera.session_scope(session_id), approval_scope(session_id, registry):
+        browser = LiveViewAgentCoreBrowser(
+            region=(
+                os.getenv("AGENTCORE_BROWSER_REGION")
+                or os.getenv("AWS_REGION")
+                or os.getenv("AWS_DEFAULT_REGION")
+            ),
+            identifier=os.getenv("AGENTCORE_BROWSER_IDENTIFIER") or None,
+            event_sink=emit_browser,
+        )
+
+        async def resolve_browser_control(payload: dict[str, Any]) -> None:
+            await run_in_threadpool(browser.handle_control, payload)
+
+        session_tools = [
+            browser.browser,
+            perplexity_agent,
+            *build_inventory_tools(VANTAGE.repository, context),
+        ]
+        with ExitStack() as stack:
             try:
+                smarty = stack.enter_context(create_smarty_mcp_client())
+                session_tools.extend(smarty.list_tools_sync())
+            except SmartyMCPConfigurationError:
+                pass
+            except Exception:
+                await websocket.send_text(json.dumps({
+                    "type": "integration_warning",
+                    "integration": "smarty",
+                    "message": "Smarty MCP is temporarily unavailable",
+                }))
+
+            agent = create_agent(
+                mode=mode,
+                voice=voice,
+                provider=provider,
+                session_tools=session_tools,
+            )
+            with browser_camera.session_scope(session_id), approval_scope(session_id, registry):
                 await agent.run(
-                    inputs=[BidiWebSocketInput(websocket, approval_resolver=resolve_approval)],
+                    inputs=[BidiWebSocketInput(
+                        websocket,
+                        approval_resolver=resolve_approval,
+                        browser_control_resolver=resolve_browser_control,
+                    )],
                     outputs=[BidiWebSocketOutput(websocket)],
                 )
-            finally:
-                browser_camera.discard_session(session_id)
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -401,6 +451,10 @@ async def websocket_endpoint(
             await websocket.send_text(json.dumps({"type": "bidi_error", "error": str(exc)}))
         except Exception:
             pass
+    finally:
+        browser_camera.discard_session(session_id)
+        if "browser" in locals():
+            browser.close_all()
 
 
 if __name__ == "__main__":

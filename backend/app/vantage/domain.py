@@ -6,6 +6,8 @@ import re
 import sqlite3
 import uuid
 from collections.abc import Callable
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .schema import INSPECTION_RESULTS, INSPECTION_TYPES, LEGACY_CHECKLIST_ID_TO_KEY, PHOTO_PURPOSES, ROOM_TYPES
@@ -19,6 +21,93 @@ class DomainError(RuntimeError):
 
 class ConflictError(DomainError):
     pass
+
+
+ASSET_TEXT_FIELDS = frozenset({
+    "asset_type", "name", "location_description", "manufacturer", "model_number",
+    "serial_number", "condition", "condition_notes", "warranty_provider", "dimensions",
+    "color_finish", "product_identifier", "notes",
+})
+ASSET_DATE_FIELDS = frozenset({
+    "purchase_date", "warranty_expiration", "installation_date", "last_service_date",
+})
+ASSET_MONEY_FIELDS = frozenset({
+    "purchase_price", "estimated_current_value", "estimated_replacement_cost",
+})
+ASSET_FIELDS = ASSET_TEXT_FIELDS | ASSET_DATE_FIELDS | ASSET_MONEY_FIELDS | {"quantity", "tags"}
+ASSET_DOCUMENT_KINDS = frozenset({"receipt", "warranty", "manual", "product_page", "other"})
+RESEARCH_PROVENANCE = frozenset({
+    "user_entered", "agent_observed", "photo_extracted", "externally_researched",
+})
+
+
+def normalize_asset_values(values: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the one logical asset contract shared by both repositories."""
+    normalized: dict[str, Any] = {}
+    for key, value in values.items():
+        if key not in ASSET_FIELDS:
+            continue
+        if value is None:
+            normalized[key] = None
+        elif key in ASSET_TEXT_FIELDS:
+            normalized[key] = str(value).strip()
+        elif key in ASSET_DATE_FIELDS:
+            try:
+                normalized[key] = date.fromisoformat(str(value)).isoformat()
+            except ValueError as exc:
+                raise DomainError(
+                    "validation_error", f"{key} must be an ISO date", fields={key: "invalid_date"}
+                ) from exc
+        elif key in ASSET_MONEY_FIELDS:
+            try:
+                amount = Decimal(str(value)).quantize(Decimal("0.01"))
+            except (InvalidOperation, ValueError) as exc:
+                raise DomainError(
+                    "validation_error", f"{key} must be a decimal amount", fields={key: "invalid_decimal"}
+                ) from exc
+            if not amount.is_finite() or amount < 0:
+                raise DomainError(
+                    "validation_error", f"{key} must be a non-negative amount", fields={key: "invalid_decimal"}
+                )
+            normalized[key] = format(amount, ".2f")
+        elif key == "quantity":
+            if isinstance(value, bool):
+                raise DomainError("validation_error", "quantity must be a positive integer", fields={key: "invalid"})
+            try:
+                quantity = int(value)
+            except (TypeError, ValueError) as exc:
+                raise DomainError("validation_error", "quantity must be a positive integer", fields={key: "invalid"}) from exc
+            if quantity <= 0 or str(value).strip() not in {str(quantity), f"{quantity}.0"}:
+                raise DomainError("validation_error", "quantity must be a positive integer", fields={key: "invalid"})
+            normalized[key] = quantity
+        else:
+            if not isinstance(value, (list, tuple, set)):
+                raise DomainError("validation_error", "tags must be a list of strings", fields={key: "invalid"})
+            tags: list[str] = []
+            for item in value:
+                tag = str(item).strip()
+                if tag and tag not in tags:
+                    tags.append(tag)
+            normalized[key] = tags
+    return normalized
+
+
+def normalize_research_value(
+    *, field_name: str, value: Any, provenance: str, confidence: Any | None
+) -> tuple[str, str, float | None]:
+    field_name = field_name.strip()
+    if not field_name:
+        raise DomainError("validation_error", "field_name is required", fields={"fieldName": "required"})
+    if provenance not in RESEARCH_PROVENANCE:
+        raise DomainError("validation_error", "provenance is not supported", fields={"provenance": "invalid"})
+    try:
+        value_json = json.dumps(value, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise DomainError("validation_error", "value must be JSON serializable", fields={"value": "invalid"}) from exc
+    normalized_confidence = None if confidence is None else float(confidence)
+    if normalized_confidence is not None and not 0 <= normalized_confidence <= 1:
+        raise DomainError("validation_error", "confidence must be between 0 and 1", fields={"confidence": "invalid"})
+    return field_name, value_json, normalized_confidence
 
 
 class VantageRepository:
@@ -43,6 +132,20 @@ class VantageRepository:
         if row is None:
             raise DomainError("not_found", f"{entity} was not found")
         return dict(row)
+
+    @staticmethod
+    def _asset_dict(row: sqlite3.Row | None) -> dict[str, Any]:
+        result = VantageRepository._dict(row, "asset")
+        raw_tags = result.pop("tags_json", None)
+        result["tags"] = json.loads(raw_tags) if raw_tags else None
+        return result
+
+    @staticmethod
+    def _research_dict(row: sqlite3.Row | None) -> dict[str, Any]:
+        result = VantageRepository._dict(row, "asset research value")
+        result["value"] = json.loads(result.pop("value_json"))
+        result["confirmed"] = bool(result["confirmed"])
+        return result
 
     @staticmethod
     def _require_client_id(client_id: str) -> str:
@@ -78,10 +181,88 @@ class VantageRepository:
             c.execute("INSERT OR IGNORE INTO app_user(id,email) VALUES (?,?)", (user_id, email.lower()))
             c.execute("INSERT OR IGNORE INTO organization_membership(organization_id,user_id,role) VALUES (?,?,?)", (organization_id, user_id, role))
 
-    def create_home(self, organization_id: str, portfolio_id: str, home_id: str, name: str) -> dict[str, Any]:
+    def list_portfolios(self, organization_id: str) -> list[dict[str, Any]]:
         with self._connection() as c:
-            c.execute("INSERT INTO home(organization_id,id,portfolio_id,name) VALUES (?,?,?,?)", (organization_id, home_id, portfolio_id, name))
-            return self._dict(c.execute("SELECT * FROM home WHERE organization_id=? AND id=?", (organization_id, home_id)).fetchone(), "home")
+            return [dict(row) for row in c.execute(
+                "SELECT * FROM portfolio WHERE organization_id=? ORDER BY name,created_at,rowid",
+                (organization_id,),
+            )]
+
+    def create_portfolio(
+        self, organization_id: str, user_id: str, name: str, client_id: str
+    ) -> dict[str, Any]:
+        client_id = self._require_client_id(client_id)
+        name = name.strip()
+        if not name:
+            raise DomainError("validation_error", "portfolio name is required", fields={"name": "required"})
+        with self._connection() as c:
+            existing = c.execute(
+                "SELECT * FROM portfolio WHERE organization_id=? AND created_by=? AND client_id=?",
+                (organization_id, user_id, client_id),
+            ).fetchone()
+            if existing is not None:
+                self._reject_conflicting_replay(existing, {"name": name})
+                return dict(existing)
+            if c.execute(
+                "SELECT 1 FROM portfolio WHERE organization_id=? AND name=?", (organization_id, name)
+            ).fetchone() is not None:
+                raise ConflictError("portfolio_name_conflict", "A portfolio with this name already exists")
+            portfolio_id = str(uuid.uuid4())
+            c.execute(
+                "INSERT INTO portfolio(organization_id,id,name,created_by,client_id) VALUES (?,?,?,?,?)",
+                (organization_id, portfolio_id, name, user_id, client_id),
+            )
+            return self._dict(c.execute(
+                "SELECT * FROM portfolio WHERE organization_id=? AND id=?", (organization_id, portfolio_id)
+            ).fetchone(), "portfolio")
+
+    def create_home(
+        self, organization_id: str, user_id: str | None = None,
+        portfolio_id: str | None = None, name: str | None = None,
+        client_id: str | None = None, *, unit_code: str | None = None,
+        formatted_address: str | None = None, home_id: str | None = None,
+    ) -> dict[str, Any]:
+        # Compatibility for bootstrap/import callers using (org, portfolio, home_id, name).
+        if home_id is not None:
+            created_by = None
+        elif client_id is None:
+            portfolio_id, home_id, created_by = user_id, portfolio_id, None
+        else:
+            client_id = self._require_client_id(client_id)
+            home_id, created_by = str(uuid.uuid4()), user_id
+        if portfolio_id is None:
+            raise DomainError("validation_error", "portfolio_id is required", fields={"portfolioId": "required"})
+        name = (name or "").strip()
+        if not name:
+            raise DomainError("validation_error", "home name is required", fields={"name": "required"})
+        unit_code = unit_code.strip() if unit_code else None
+        formatted_address = formatted_address.strip() if formatted_address else None
+        with self._connection() as c:
+            if c.execute(
+                "SELECT 1 FROM portfolio WHERE organization_id=? AND id=?",
+                (organization_id, portfolio_id),
+            ).fetchone() is None:
+                raise DomainError("not_found", "portfolio was not found")
+            if client_id is not None:
+                existing = c.execute(
+                    "SELECT * FROM home WHERE organization_id=? AND created_by=? AND client_id=?",
+                    (organization_id, created_by, client_id),
+                ).fetchone()
+                if existing is not None:
+                    self._reject_conflicting_replay(existing, {
+                        "portfolio_id": portfolio_id, "name": name, "unit_code": unit_code,
+                        "formatted_address": formatted_address,
+                    })
+                    return dict(existing)
+            c.execute(
+                """INSERT INTO home(
+                     organization_id,id,portfolio_id,name,unit_code,formatted_address,created_by,client_id)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (organization_id, home_id, portfolio_id, name, unit_code, formatted_address, created_by, client_id),
+            )
+            return self._dict(c.execute(
+                "SELECT * FROM home WHERE organization_id=? AND id=?", (organization_id, home_id)
+            ).fetchone(), "home")
 
     def _home(self, c: sqlite3.Connection, organization_id: str, home_id: str) -> sqlite3.Row:
         row = c.execute("SELECT * FROM home WHERE organization_id=? AND id=? AND lifecycle_state='active'", (organization_id, home_id)).fetchone()
@@ -218,8 +399,18 @@ class VantageRepository:
                 "room",
             )
 
-    def create_asset(self, organization_id: str, user_id: str, room_id: str, inspection_id: str | None, asset_type: str, name: str, client_id: str) -> dict[str, Any]:
+    def create_asset(
+        self, organization_id: str, user_id: str, room_id: str,
+        inspection_id: str | None, asset_type: str, name: str, client_id: str,
+        **metadata: Any,
+    ) -> dict[str, Any]:
         client_id = self._require_client_id(client_id)
+        values = normalize_asset_values({"asset_type": asset_type, "name": name, **metadata})
+        database_values = {
+            ("tags_json" if key == "tags" else key):
+                (json.dumps(value, separators=(",", ":")) if key == "tags" and value is not None else value)
+            for key, value in values.items()
+        }
         with self._connection() as c:
             room = c.execute("SELECT * FROM room WHERE organization_id=? AND id=? AND lifecycle_state='active'", (organization_id, room_id)).fetchone()
             if room is None:
@@ -229,7 +420,18 @@ class VantageRepository:
             existing = c.execute("SELECT * FROM asset WHERE organization_id=? AND created_by=? AND room_id=? AND client_id=?", (organization_id, user_id, room_id, client_id)).fetchone()
             if existing is None:
                 asset_id = str(uuid.uuid4())
-                c.execute("INSERT INTO asset(organization_id,id,home_id,room_id,asset_type,name,created_by,creating_inspection_id,client_id) VALUES (?,?,?,?,?,?,?,?,?)", (organization_id, asset_id, room["home_id"], room_id, asset_type.strip(), name.strip(), user_id, inspection_id, client_id))
+                fixed = {
+                    "organization_id": organization_id, "id": asset_id, "home_id": room["home_id"],
+                    "room_id": room_id, "created_by": user_id,
+                    "creating_inspection_id": inspection_id, "client_id": client_id,
+                }
+                insert_values = {**fixed, **database_values}
+                columns = ",".join(insert_values)
+                placeholders = ",".join("?" for _ in insert_values)
+                c.execute(
+                    f"INSERT INTO asset({columns}) VALUES ({placeholders})",
+                    tuple(insert_values.values()),
+                )
                 if inspection_id:
                     c.execute(
                         """INSERT INTO inspection_inventory_link(
@@ -240,15 +442,15 @@ class VantageRepository:
                 existing = c.execute("SELECT * FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)).fetchone()
             else:
                 self._reject_conflicting_replay(existing, {
-                    "creating_inspection_id": inspection_id,
-                    "asset_type": asset_type.strip(),
-                    "name": name.strip(),
+                    "creating_inspection_id": inspection_id, **database_values,
                 })
-            return dict(existing)
+            return self._asset_dict(existing)
 
     def get_asset(self, organization_id: str, asset_id: str) -> dict[str, Any]:
         with self._connection() as c:
-            return self._dict(c.execute("SELECT * FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)).fetchone(), "asset")
+            return self._asset_dict(c.execute(
+                "SELECT * FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)
+            ).fetchone())
 
     def list_assets(self, organization_id: str, room_id: str) -> list[dict[str, Any]]:
         with self._connection() as c:
@@ -257,7 +459,7 @@ class VantageRepository:
                 (organization_id, room_id),
             ).fetchone() is None:
                 raise DomainError("not_found", "room was not found")
-            return [dict(row) for row in c.execute(
+            return [self._asset_dict(row) for row in c.execute(
                 "SELECT * FROM asset WHERE organization_id=? AND room_id=? AND lifecycle_state='active' ORDER BY created_at",
                 (organization_id, room_id),
             )]
@@ -280,14 +482,18 @@ class VantageRepository:
                 "UPDATE asset SET room_id=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id=?",
                 (target_room_id, organization_id, asset_id),
             )
-            return self._dict(
-                c.execute("SELECT * FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)).fetchone(),
-                "asset",
-            )
+            return self._asset_dict(c.execute(
+                "SELECT * FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)
+            ).fetchone())
 
     def update_asset(self, organization_id: str, user_id: str, asset_id: str, **changes: Any) -> dict[str, Any]:
-        allowed = {"asset_type", "name", "location_description", "manufacturer", "model_number", "serial_number", "condition", "condition_notes", "notes"}
-        changes = {key: value for key, value in changes.items() if key in allowed}
+        del user_id
+        changes = normalize_asset_values(changes)
+        changes = {
+            ("tags_json" if key == "tags" else key):
+                (json.dumps(value, separators=(",", ":")) if key == "tags" and value is not None else value)
+            for key, value in changes.items()
+        }
         with self._connection() as c:
             if c.execute("SELECT 1 FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)).fetchone() is None:
                 raise DomainError("not_found", "asset was not found")
@@ -295,7 +501,121 @@ class VantageRepository:
                 values = list(changes.values()) + [organization_id, asset_id]
                 c.execute(f"UPDATE asset SET {','.join(f'{key}=?' for key in changes)}, updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND id=?", values)
             self._refresh_asset_completion(c, organization_id, asset_id)
-            return self._dict(c.execute("SELECT * FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)).fetchone(), "asset")
+            return self._asset_dict(c.execute(
+                "SELECT * FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)
+            ).fetchone())
+
+    def record_asset_document(
+        self, organization_id: str, asset_id: str, kind: str, *,
+        photo_id: str | None = None, source_url: str | None = None,
+    ) -> dict[str, Any]:
+        kind = kind.strip()
+        if kind not in ASSET_DOCUMENT_KINDS:
+            raise DomainError("validation_error", "document kind is not supported", fields={"kind": "invalid"})
+        if (photo_id is None) == (source_url is None):
+            raise DomainError(
+                "validation_error", "exactly one of photo_id or source_url is required",
+                fields={"document": "exactly_one_reference_required"},
+            )
+        normalized_url = source_url.strip() if source_url else None
+        if normalized_url is not None and not re.fullmatch(r"https?://\S+", normalized_url):
+            raise DomainError("validation_error", "source_url must be HTTP(S)", fields={"sourceUrl": "invalid"})
+        with self._connection() as c:
+            if c.execute(
+                "SELECT 1 FROM asset WHERE organization_id=? AND id=? AND lifecycle_state='active'",
+                (organization_id, asset_id),
+            ).fetchone() is None:
+                raise DomainError("not_found", "asset was not found")
+            object_key = None
+            if photo_id is not None:
+                photo = c.execute(
+                    """SELECT * FROM photo WHERE organization_id=? AND id=? AND asset_id=?
+                       AND upload_status='verified' AND purpose='asset_document'""",
+                    (organization_id, photo_id, asset_id),
+                ).fetchone()
+                if photo is None or not photo["original_object_key"]:
+                    raise DomainError(
+                        "document_photo_not_verified",
+                        "photo is not a verified asset document original for this asset",
+                    )
+                object_key = photo["original_object_key"]
+            if object_key is not None:
+                existing = c.execute(
+                    """SELECT * FROM asset_document WHERE organization_id=? AND asset_id=?
+                       AND kind=? AND object_key=?""",
+                    (organization_id, asset_id, kind, object_key),
+                ).fetchone()
+            else:
+                existing = c.execute(
+                    """SELECT * FROM asset_document WHERE organization_id=? AND asset_id=?
+                       AND kind=? AND source_url=?""",
+                    (organization_id, asset_id, kind, normalized_url),
+                ).fetchone()
+            if existing is None:
+                document_id = str(uuid.uuid4())
+                c.execute(
+                    """INSERT INTO asset_document(
+                         organization_id,id,asset_id,kind,object_key,source_url)
+                       VALUES (?,?,?,?,?,?)""",
+                    (organization_id, document_id, asset_id, kind, object_key, normalized_url),
+                )
+                existing = c.execute(
+                    "SELECT * FROM asset_document WHERE organization_id=? AND id=?",
+                    (organization_id, document_id),
+                ).fetchone()
+            return self._dict(existing, "asset document")
+
+    def list_asset_documents(self, organization_id: str, asset_id: str) -> list[dict[str, Any]]:
+        with self._connection() as c:
+            if c.execute(
+                "SELECT 1 FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)
+            ).fetchone() is None:
+                raise DomainError("not_found", "asset was not found")
+            return [dict(row) for row in c.execute(
+                """SELECT * FROM asset_document WHERE organization_id=? AND asset_id=?
+                   ORDER BY created_at,rowid""",
+                (organization_id, asset_id),
+            )]
+
+    def record_asset_research_value(
+        self, organization_id: str, asset_id: str, *, field_name: str, value: Any,
+        provenance: str, source_reference: str | None = None,
+        confidence: Any | None = None, confirmed: bool = False,
+    ) -> dict[str, Any]:
+        field_name, value_json, confidence = normalize_research_value(
+            field_name=field_name, value=value, provenance=provenance, confidence=confidence
+        )
+        source_reference = source_reference.strip() if source_reference else None
+        with self._connection() as c:
+            if c.execute(
+                "SELECT 1 FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)
+            ).fetchone() is None:
+                raise DomainError("not_found", "asset was not found")
+            research_id = str(uuid.uuid4())
+            c.execute(
+                """INSERT INTO asset_research_value(
+                     organization_id,id,asset_id,field_name,value_json,provenance,
+                     source_reference,retrieved_at,confidence,confirmed)
+                   VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?)""",
+                (organization_id, research_id, asset_id, field_name, value_json, provenance,
+                 source_reference, confidence, int(bool(confirmed))),
+            )
+            return self._research_dict(c.execute(
+                "SELECT * FROM asset_research_value WHERE organization_id=? AND id=?",
+                (organization_id, research_id),
+            ).fetchone())
+
+    def list_asset_research_values(self, organization_id: str, asset_id: str) -> list[dict[str, Any]]:
+        with self._connection() as c:
+            if c.execute(
+                "SELECT 1 FROM asset WHERE organization_id=? AND id=?", (organization_id, asset_id)
+            ).fetchone() is None:
+                raise DomainError("not_found", "asset was not found")
+            return [self._research_dict(row) for row in c.execute(
+                """SELECT * FROM asset_research_value WHERE organization_id=? AND asset_id=?
+                   ORDER BY created_at,rowid""",
+                (organization_id, asset_id),
+            )]
 
     def create_photo_upload(self, organization_id: str, user_id: str, home_id: str, room_id: str,
                             asset_id: str, inspection_id: str | None, client_id: str,

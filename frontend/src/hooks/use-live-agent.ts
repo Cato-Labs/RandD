@@ -33,8 +33,18 @@ import type {
 } from "@/lib/live-types";
 
 const MIC_SAMPLE_RATE = 16000;
+const BROWSER_LIVE_VIEW_REFRESH_MS = 4 * 60 * 1000;
 
 type ChatStatus = "ready" | "submitted" | "streaming" | "error";
+
+type BrowserSession = {
+  sessionName: string;
+  liveViewUrl: string;
+  currentPageUrl: string;
+  status: string;
+};
+
+type BrowserControlState = "agent" | "human" | "closed" | "error";
 
 type ServerEvent = Record<string, unknown> & { type: string };
 
@@ -71,6 +81,9 @@ export const useLiveAgent = () => {
   const [voices, setVoices] = useState<LiveVoice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  const [browserSession, setBrowserSession] = useState<BrowserSession | null>(null);
+  const [browserControlState, setBrowserControlState] =
+    useState<BrowserControlState>("agent");
 
   const socketRef = useRef<WebSocket | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -338,6 +351,25 @@ export const useLiveAgent = () => {
           sessionStartRef.current = performance.now();
           break;
         }
+        case "browser_session": {
+          const sessionName = String(event.sessionName ?? "");
+          if (!sessionName) break;
+          setBrowserSession((current) => ({
+            sessionName,
+            liveViewUrl: String(event.liveViewUrl ?? current?.liveViewUrl ?? ""),
+            currentPageUrl: String(
+              event.currentPageUrl ?? current?.currentPageUrl ?? ""
+            ),
+            status: String(event.status ?? current?.status ?? "active"),
+          }));
+          break;
+        }
+        case "browser_control": {
+          const state = String(event.state ?? "error") as BrowserControlState;
+          setBrowserControlState(state);
+          if (state === "closed") setBrowserSession(null);
+          break;
+        }
         case "bidi_response_start": {
           setChatStatus("streaming");
           break;
@@ -545,6 +577,8 @@ export const useLiveAgent = () => {
     playerRef.current = null;
     socketRef.current?.close();
     socketRef.current = null;
+    setBrowserSession(null);
+    setBrowserControlState("agent");
     setStatus("disconnected");
     setChatStatus("ready");
   }, []);
@@ -795,6 +829,46 @@ export const useLiveAgent = () => {
     [deliver]
   );
 
+  const sendBrowserControl = useCallback(
+    (action: "take" | "release" | "refresh_live_view") => {
+      if (!browserSession?.sessionName) return;
+      sendRaw({
+        type: "browser_control",
+        action,
+        sessionName: browserSession.sessionName,
+      });
+    },
+    [browserSession?.sessionName, sendRaw]
+  );
+
+  const takeBrowserControl = useCallback(
+    () => sendBrowserControl("take"),
+    [sendBrowserControl]
+  );
+
+  const releaseBrowserControl = useCallback(
+    () => sendBrowserControl("release"),
+    [sendBrowserControl]
+  );
+
+  const refreshBrowserLiveView = useCallback(
+    () => sendBrowserControl("refresh_live_view"),
+    [sendBrowserControl]
+  );
+
+  useEffect(() => {
+    if (!browserSession?.sessionName || !browserSession.liveViewUrl) return;
+    const timer = window.setTimeout(
+      refreshBrowserLiveView,
+      BROWSER_LIVE_VIEW_REFRESH_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [
+    browserSession?.sessionName,
+    browserSession?.liveViewUrl,
+    refreshBrowserLiveView,
+  ]);
+
   const cancelQueued = useCallback((id: string) => {
     setQueue((prev) => prev.filter((entry) => entry.id !== id));
   }, []);
@@ -873,6 +947,11 @@ export const useLiveAgent = () => {
     agentCard,
     workspaceFiles,
     refreshWorkspace,
+    browserSession,
+    browserControlState,
+    takeBrowserControl,
+    releaseBrowserControl,
+    refreshBrowserLiveView,
   };
 };
 

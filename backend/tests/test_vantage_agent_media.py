@@ -10,11 +10,10 @@ from app.evidence_storage import (
     verify_original,
 )
 from app.escapia_read import ReadOnlyEscapiaAdapter
-from app.inventory_tools import AgentInventoryService, ToolContext
 from app.memory_namespace import memory_namespace
 from app.report_artifacts import ReportArtifactStore
 from app.session_media import SessionMediaRegistry
-from app.tool_policy import FIELD_TOOL_ALLOWLIST, validate_field_tools
+from strands import tool
 
 
 def test_session_media_isolates_frames_and_clips():
@@ -199,63 +198,54 @@ def test_original_verification_checks_mime_size_and_hash():
     assert exc.value.retryable is True
 
 
-class RecordingRepository:
-    def __init__(self):
-        self.calls = []
-
-    async def create_room(self, context, payload, idempotency_key):
-        self.calls.append((context, payload, idempotency_key))
-        return {"id": payload["client_id"], "name": payload["name"]}
-
-
-@pytest.mark.asyncio
-async def test_inventory_tool_passes_structured_authorization_context():
-    repo = RecordingRepository()
-    service = AgentInventoryService(repo)
-    context = ToolContext("org-1", "user-1", frozenset({"inspector"}), "home-1", "inspection-1", "s-1")
-    result = await service.create_room(
-        context,
-        {"client_id": "room-client-1", "room_type_id": "bedroom", "name": "Bedroom 2"},
-        "idem-1",
-    )
-    assert result == {"ok": True, "data": {"id": "room-client-1", "name": "Bedroom 2"}}
-    assert repo.calls[0][0] is context
-
-
-@pytest.mark.asyncio
-async def test_inventory_tool_returns_structured_authorization_error():
-    service = AgentInventoryService(RecordingRepository())
-    context = ToolContext("", "user-1", frozenset(), "home-1", "inspection-1", "s-1")
-    result = await service.list_rooms(context)
-    assert result["ok"] is False
-    assert result["error"]["code"] == "authorization_context_missing"
-
-
-@pytest.mark.asyncio
-async def test_all_mutating_inventory_tools_require_stable_ids():
-    service = AgentInventoryService(RecordingRepository())
-    context = ToolContext("org", "user", frozenset({"inspector"}), "home", "inspection", "session")
-    for operation in (
-        "update_room", "archive_room", "create_asset", "update_asset", "move_asset",
-        "attach_original_photo", "record_research_result", "mark_low_confidence_value",
-        "save_walkthrough_progress", "complete_onboarding_assessment",
-    ):
-        result = await service.invoke(operation, context, name="x")
-        assert result["error"]["code"] == "idempotency_required"
-
-
 def test_memory_namespace_is_tenant_safe():
     assert memory_namespace("org-1", "portfolio-1", "home-1") == "orgs/org-1/portfolios/portfolio-1/homes/home-1"
     with pytest.raises(ValueError):
         memory_namespace("org-1", "portfolio-1", "../home-2")
 
 
-def test_field_allowlist_excludes_runtime_tools():
-    validate_field_tools(FIELD_TOOL_ALLOWLIST)
-    for forbidden in ("shell", "editor", "environment", "http_request", "load_tool"):
-        assert forbidden not in FIELD_TOOL_ALLOWLIST
-    with pytest.raises(ValueError):
-        validate_field_tools(["create_room", "shell"])
+def test_agent_uses_unrestricted_core_and_session_tools(monkeypatch):
+    import app.agent as agent_module
+
+    captured = {}
+
+    class FakeBidiAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    @tool
+    def session_inventory_tool() -> str:
+        """A tenant-bound tool supplied by the live session."""
+        return "ok"
+
+    monkeypatch.setattr(agent_module, "BidiAgent", FakeBidiAgent)
+    monkeypatch.setattr(agent_module, "build_model", lambda *args: object())
+    monkeypatch.setattr(agent_module, "memory_tools", lambda: [])
+
+    agent_module.create_agent(
+        mode="audio",
+        voice="Puck",
+        provider="gemini",
+        session_tools=[session_inventory_tool],
+    )
+
+    names = {getattr(item, "tool_name", getattr(item, "__name__", "")) for item in captured["tools"]}
+    assert {
+        "shell",
+        "editor",
+        "load_tool",
+        "list_library_tools",
+        "mcp_client",
+        "http_request",
+        "environment",
+        "use_agent",
+        "batch",
+        "workflow",
+        "swarm",
+        "graph",
+        "image_reader",
+        "session_inventory_tool",
+    } <= names
 
 
 class FakeEscapiaClient:

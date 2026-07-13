@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Annotated, Any
 
@@ -17,6 +15,19 @@ class InspectionCreate(BaseModel):
     clientId: str
 
 
+class PortfolioCreate(BaseModel):
+    name: str
+    clientId: str
+
+
+class HomeCreate(BaseModel):
+    portfolioId: str
+    name: str
+    clientId: str
+    unitCode: str | None = None
+    formattedAddress: str | None = None
+
+
 class RoomCreate(BaseModel):
     roomTypeId: str
     name: str
@@ -29,6 +40,26 @@ class AssetCreate(BaseModel):
     name: str = ""
     inspectionId: str | None = None
     clientId: str
+    locationDescription: str | None = None
+    manufacturer: str | None = None
+    modelNumber: str | None = None
+    serialNumber: str | None = None
+    quantity: int | None = None
+    condition: str | None = None
+    conditionNotes: str | None = None
+    purchaseDate: str | None = None
+    purchasePrice: str | None = None
+    estimatedCurrentValue: str | None = None
+    estimatedReplacementCost: str | None = None
+    warrantyProvider: str | None = None
+    warrantyExpiration: str | None = None
+    dimensions: str | None = None
+    colorFinish: str | None = None
+    installationDate: str | None = None
+    lastServiceDate: str | None = None
+    productIdentifier: str | None = None
+    notes: str | None = None
+    tags: list[str] | None = None
 
 
 class RoomUpdate(BaseModel):
@@ -46,10 +77,38 @@ class AssetUpdate(BaseModel):
     manufacturer: str | None = None
     modelNumber: str | None = None
     serialNumber: str | None = None
+    quantity: int | None = None
     condition: str | None = None
     conditionNotes: str | None = None
+    purchaseDate: str | None = None
+    purchasePrice: str | None = None
+    estimatedCurrentValue: str | None = None
+    estimatedReplacementCost: str | None = None
+    warrantyProvider: str | None = None
+    warrantyExpiration: str | None = None
+    dimensions: str | None = None
+    colorFinish: str | None = None
+    installationDate: str | None = None
+    lastServiceDate: str | None = None
+    productIdentifier: str | None = None
     notes: str | None = None
+    tags: list[str] | None = None
     roomId: str | None = None
+
+
+class AssetDocumentCreate(BaseModel):
+    kind: str
+    photoId: str | None = None
+    sourceUrl: str | None = None
+
+
+class AssetResearchValueCreate(BaseModel):
+    fieldName: str
+    value: Any
+    provenance: str
+    sourceReference: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    confirmed: bool = False
 
 
 class UploadCreate(BaseModel):
@@ -107,6 +166,59 @@ def create_vantage_router(
             return getattr(repository, method)(*args, **kwargs)
         with transaction(context) as active:
             return getattr(active, method)(*args, **kwargs)
+
+    def read_asset_collection(
+        context: TenantContext, asset_id: str, method: str
+    ) -> list[dict[str, Any]]:
+        transaction = getattr(repository, "read_only_transaction", None)
+        if transaction is None:
+            asset = repository.get_asset(context.organization_id, asset_id)
+            _require_home_read(context, asset["home_id"])
+            return getattr(repository, method)(context.organization_id, asset_id)
+        with transaction(context) as active:
+            asset = active.get_asset(context.organization_id, asset_id)
+            _require_home_read(context, asset["home_id"])
+            return getattr(active, method)(context.organization_id, asset_id)
+
+    @router.get("/portfolios")
+    def portfolios(context: Context) -> list[dict[str, Any]]:
+        try:
+            return call(context, "list_portfolios", context.organization_id, read_only=True)
+        except DomainError as error:
+            _raise(error)
+
+    @router.post("/portfolios", status_code=201)
+    def create_portfolio(payload: PortfolioCreate, context: Context) -> dict[str, Any]:
+        _require_write(context)
+        try:
+            return call(
+                context,
+                "create_portfolio",
+                context.organization_id,
+                context.user_id,
+                payload.name,
+                payload.clientId,
+            )
+        except DomainError as error:
+            _raise(error)
+
+    @router.post("/homes", status_code=201)
+    def create_home(payload: HomeCreate, context: Context) -> dict[str, Any]:
+        _require_write(context)
+        try:
+            return call(
+                context,
+                "create_home",
+                context.organization_id,
+                context.user_id,
+                payload.portfolioId,
+                payload.name,
+                payload.clientId,
+                unit_code=payload.unitCode,
+                formatted_address=payload.formattedAddress,
+            )
+        except DomainError as error:
+            _raise(error)
 
     @router.get("/room-types")
     def room_types(context: Context) -> list[dict[str, Any]]:
@@ -204,8 +316,41 @@ def create_vantage_router(
     @router.post("/rooms/{room_id}/assets", status_code=201)
     def create_asset(room_id: str, payload: AssetCreate, context: Context, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None) -> dict[str, Any]:
         _require_write(context)
+        metadata = {
+            "location_description": payload.locationDescription,
+            "manufacturer": payload.manufacturer,
+            "model_number": payload.modelNumber,
+            "serial_number": payload.serialNumber,
+            "quantity": payload.quantity,
+            "condition": payload.condition,
+            "condition_notes": payload.conditionNotes,
+            "purchase_date": payload.purchaseDate,
+            "purchase_price": payload.purchasePrice,
+            "estimated_current_value": payload.estimatedCurrentValue,
+            "estimated_replacement_cost": payload.estimatedReplacementCost,
+            "warranty_provider": payload.warrantyProvider,
+            "warranty_expiration": payload.warrantyExpiration,
+            "dimensions": payload.dimensions,
+            "color_finish": payload.colorFinish,
+            "installation_date": payload.installationDate,
+            "last_service_date": payload.lastServiceDate,
+            "product_identifier": payload.productIdentifier,
+            "notes": payload.notes,
+            "tags": payload.tags,
+        }
         try:
-            return call(context, "create_asset", context.organization_id, context.user_id, room_id, payload.inspectionId, payload.assetType, payload.name, payload.clientId or idempotency_key or "")
+            return call(
+                context,
+                "create_asset",
+                context.organization_id,
+                context.user_id,
+                room_id,
+                payload.inspectionId,
+                payload.assetType,
+                payload.name,
+                payload.clientId or idempotency_key or "",
+                **{key: value for key, value in metadata.items() if value is not None},
+            )
         except DomainError as error:
             _raise(error)
 
@@ -215,7 +360,14 @@ def create_vantage_router(
         values = {
             "asset_type": payload.assetType, "name": payload.name, "location_description": payload.locationDescription,
             "manufacturer": payload.manufacturer, "model_number": payload.modelNumber, "serial_number": payload.serialNumber,
-            "condition": payload.condition, "condition_notes": payload.conditionNotes, "notes": payload.notes,
+            "quantity": payload.quantity, "condition": payload.condition, "condition_notes": payload.conditionNotes,
+            "purchase_date": payload.purchaseDate, "purchase_price": payload.purchasePrice,
+            "estimated_current_value": payload.estimatedCurrentValue,
+            "estimated_replacement_cost": payload.estimatedReplacementCost,
+            "warranty_provider": payload.warrantyProvider, "warranty_expiration": payload.warrantyExpiration,
+            "dimensions": payload.dimensions, "color_finish": payload.colorFinish,
+            "installation_date": payload.installationDate, "last_service_date": payload.lastServiceDate,
+            "product_identifier": payload.productIdentifier, "notes": payload.notes, "tags": payload.tags,
         }
         try:
             transaction = getattr(repository, "transaction", None)
@@ -228,6 +380,59 @@ def create_vantage_router(
                 if payload.roomId is not None:
                     active.move_asset(context.organization_id, context.user_id, asset_id, payload.roomId)
                 return active.update_asset(context.organization_id, context.user_id, asset_id, **{k: v for k, v in values.items() if v is not None})
+        except DomainError as error:
+            _raise(error)
+
+    @router.get("/assets/{asset_id}/documents")
+    def asset_documents(asset_id: str, context: Context) -> list[dict[str, Any]]:
+        try:
+            return read_asset_collection(context, asset_id, "list_asset_documents")
+        except DomainError as error:
+            _raise(error)
+
+    @router.post("/assets/{asset_id}/documents", status_code=201)
+    def record_asset_document(
+        asset_id: str, payload: AssetDocumentCreate, context: Context
+    ) -> dict[str, Any]:
+        _require_write(context)
+        try:
+            return call(
+                context,
+                "record_asset_document",
+                context.organization_id,
+                asset_id,
+                payload.kind,
+                photo_id=payload.photoId,
+                source_url=payload.sourceUrl,
+            )
+        except DomainError as error:
+            _raise(error)
+
+    @router.get("/assets/{asset_id}/research-values")
+    def asset_research_values(asset_id: str, context: Context) -> list[dict[str, Any]]:
+        try:
+            return read_asset_collection(context, asset_id, "list_asset_research_values")
+        except DomainError as error:
+            _raise(error)
+
+    @router.post("/assets/{asset_id}/research-values", status_code=201)
+    def record_asset_research_value(
+        asset_id: str, payload: AssetResearchValueCreate, context: Context
+    ) -> dict[str, Any]:
+        _require_write(context)
+        try:
+            return call(
+                context,
+                "record_asset_research_value",
+                context.organization_id,
+                asset_id,
+                field_name=payload.fieldName,
+                value=payload.value,
+                provenance=payload.provenance,
+                source_reference=payload.sourceReference,
+                confidence=payload.confidence,
+                confirmed=payload.confirmed,
+            )
         except DomainError as error:
             _raise(error)
 
