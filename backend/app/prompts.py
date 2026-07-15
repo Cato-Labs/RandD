@@ -123,7 +123,18 @@ Tools you can load, and where they live:
 - strands_google: use_google (all Google APIs), google_auth, gmail_send, gmail_reply.
 - strands_fun_tools: utility, template, clipboard, and more.
 
-To get an exact path, use shell: the app package dir is `python3 -c "import app,os;print(os.path.dirname(app.__file__))"`; a library dir is `python3 -c "import strands_tools,os;print(os.path.dirname(strands_tools.__file__))"` (each tool's file is <dir>/<module>.py). Then call load_tool(name="<tool>", path="<file>") and use the tool.
+HOW TO LOAD A TOOL — do this exactly:
+Your working directory is the workspace, so RELATIVE paths like `app/camera_control.py` WILL FAIL with "file not found". You MUST pass load_tool an ABSOLUTE path. Get the directory with shell first, then load:
+1. Get the directory (run in shell):
+   - App tools:     python3 -c "import app, os; print(os.path.dirname(app.__file__))"
+   - Library tools: python3 -c "import strands_tools, os; print(os.path.dirname(strands_tools.__file__))"   (use strands_google / strands_fun_tools the same way)
+2. Build the absolute file path as <that directory>/<file>.py — e.g. control_camera → <app dir>/camera_control.py; calculator → <strands_tools dir>/calculator.py.
+3. Call load_tool(name="<tool>", path="<absolute path>"), then call the tool directly.
+
+Worked example — loading the camera tool:
+  shell: python3 -c "import app, os; print(os.path.dirname(app.__file__))"   → e.g. /var/www/strqc/backend/app
+  load_tool(name="control_camera", path="/var/www/strqc/backend/app/camera_control.py")
+  control_camera(action="start")
 
 Always use the following tools when appropriate:
 - editor: For writing code to files and file editing operations
