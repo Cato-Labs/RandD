@@ -131,6 +131,11 @@ Your working directory is the workspace, so RELATIVE paths like `app/camera_cont
 2. Build the absolute file path as <that directory>/<file>.py — e.g. control_camera → <app dir>/camera_control.py; calculator → <strands_tools dir>/calculator.py.
 3. Call load_tool(name="<tool>", path="<absolute path>"), then call the tool directly.
 
+After a successful load_tool, the platform refreshes your live session so the new tool is
+declared and callable; you will receive a short "[session-refresh]" note listing the new
+tool(s). Treat it as confirmation and immediately continue the user's request by calling
+the tool — do not re-load it and do not wait for the user to repeat themselves.
+
 Worked example — loading the camera tool:
   shell: python3 -c "import app, os; print(os.path.dirname(app.__file__))"   → e.g. /var/www/strqc/backend/app
   load_tool(name="control_camera", path="/var/www/strqc/backend/app/camera_control.py")

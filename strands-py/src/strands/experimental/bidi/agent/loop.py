@@ -51,6 +51,11 @@ class _BidiAgentLoop:
             that tools can access via their invocation_state parameter.
         _send_gate: Gate the sending of events to the model.
             Blocks when agent is reseting the model connection after timeout.
+        _declared_tool_names: Tool names declared to the live model connection.
+            Live providers only honor tools declared at connection start, so this is the
+            source of truth for what the model can actually call right now.
+        _model_task: Task running the current model connection's receive loop.
+        _sync_lock: Serialize tool declaration syncs across concurrent tool tasks.
     """
 
     def __init__(self, agent: "BidiAgent") -> None:
@@ -68,6 +73,9 @@ class _BidiAgentLoop:
         self._invocation_state: dict[str, Any]
 
         self._send_gate = asyncio.Event()
+        self._declared_tool_names: set[str] = set()
+        self._model_task: asyncio.Task | None = None
+        self._sync_lock = asyncio.Lock()
 
     async def start(self, invocation_state: dict[str, Any] | None = None) -> None:
         """Start the agent loop.
@@ -88,16 +96,18 @@ class _BidiAgentLoop:
         logger.debug("agent loop starting")
         await self._agent.hooks.invoke_callbacks_async(BidiBeforeInvocationEvent(agent=self._agent))
 
+        tool_specs = self._agent.tool_registry.get_all_tool_specs()
         await self._agent.model.start(
             system_prompt=self._agent.system_prompt,
-            tools=self._agent.tool_registry.get_all_tool_specs(),
+            tools=tool_specs,
             messages=self._agent.messages,
         )
+        self._declared_tool_names = {tool_spec["name"] for tool_spec in tool_specs}
 
         self._event_queue = asyncio.Queue(maxsize=1)
 
         self._task_pool = _TaskPool()
-        self._task_pool.create(self._run_model())
+        self._model_task = self._task_pool.create(self._run_model())
 
         self._invocation_state = invocation_state or {}
         self._send_gate.set()
@@ -110,6 +120,8 @@ class _BidiAgentLoop:
         self._started = False
         self._send_gate.clear()
         self._invocation_state = {}
+        self._declared_tool_names = set()
+        self._model_task = None
 
         async def stop_tasks() -> None:
             await self._task_pool.cancel()
@@ -191,13 +203,15 @@ class _BidiAgentLoop:
         restart_exception = None
         try:
             await self._agent.model.stop()
+            tool_specs = self._agent.tool_registry.get_all_tool_specs()
             await self._agent.model.start(
                 self._agent.system_prompt,
-                self._agent.tool_registry.get_all_tool_specs(),
+                tool_specs,
                 self._agent.messages,
                 **timeout_error.restart_config,
             )
-            self._task_pool.create(self._run_model())
+            self._declared_tool_names = {tool_spec["name"] for tool_spec in tool_specs}
+            self._model_task = self._task_pool.create(self._run_model())
         except Exception as exception:
             restart_exception = exception
         finally:
@@ -206,6 +220,71 @@ class _BidiAgentLoop:
             )
 
         self._send_gate.set()
+
+    async def _sync_tool_declarations(self) -> bool:
+        """Re-declare tools to the live model if the registry changed mid-session.
+
+        Live providers (Gemini Live, OpenAI Realtime, Nova Sonic) only call functions
+        declared in the connection's start config. A tool registered mid-session (e.g. via
+        ``load_tool``) is executable by the registry but invisible to the model, so the
+        connection is gracefully restarted with the full registry declared and the
+        conversation history replayed.
+
+        The restart intentionally starts a fresh provider session rather than resuming
+        (e.g. via Gemini's session resumption handle) because resumed sessions keep their
+        original tool declarations.
+
+        Returns:
+            True if the connection was restarted, in which case the caller must not send
+            the pending tool result live — it is already part of the replayed history.
+        """
+        async with self._sync_lock:
+            tool_specs = self._agent.tool_registry.get_all_tool_specs()
+            tool_names = {tool_spec["name"] for tool_spec in tool_specs}
+            if tool_names == self._declared_tool_names:
+                return False
+
+            new_tool_names = tool_names - self._declared_tool_names
+            logger.debug(
+                "new_tools=<%s>, removed_tools=<%s> | tool registry changed, restarting model connection",
+                sorted(new_tool_names),
+                sorted(self._declared_tool_names - tool_names),
+            )
+
+            self._send_gate.clear()
+            try:
+                if self._model_task is not None and not self._model_task.done():
+                    self._model_task.cancel()
+                    try:
+                        await self._model_task
+                    except asyncio.CancelledError:
+                        pass
+
+                await self._agent.model.stop()
+                await self._agent.model.start(
+                    self._agent.system_prompt,
+                    tool_specs,
+                    self._agent.messages,
+                )
+                self._declared_tool_names = tool_names
+                self._model_task = self._task_pool.create(self._run_model())
+            finally:
+                self._send_gate.set()
+
+        # The fresh connection is idle until prompted, so nudge the model to pick the
+        # conversation back up and act on the newly declared tools.
+        if new_tool_names:
+            names = ", ".join(sorted(new_tool_names))
+            await self.send(
+                BidiTextInputEvent(
+                    text=(
+                        f"[session-refresh] New tool(s) loaded successfully and now callable: {names}. "
+                        "Continue the conversation from where it left off and call them directly as needed."
+                    )
+                )
+            )
+
+        return True
 
     async def _run_model(self) -> None:
         """Task for running the model.
@@ -308,6 +387,13 @@ class _BidiAgentLoop:
                     BidiConnectionCloseEvent(connection_id=connection_id, reason="user_request")
                 )
                 return  # Skip sending result to model
+
+            # A tool run may have registered new tools (e.g. load_tool). Live models only
+            # call functions declared at connection start, so re-declare via graceful
+            # restart before the model resumes. The restart replays history, which
+            # already contains this tool result, so it must not also be sent live.
+            if await self._sync_tool_declarations():
+                return
 
             # Send result to model
             await self.send(tool_result_event)
