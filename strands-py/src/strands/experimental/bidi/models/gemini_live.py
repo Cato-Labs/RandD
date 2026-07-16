@@ -35,6 +35,7 @@ from ..types.events import (
     BidiInputEvent,
     BidiInterruptionEvent,
     BidiOutputEvent,
+    BidiResponseCompleteEvent,
     BidiTextInputEvent,
     BidiTranscriptStreamEvent,
     BidiUsageEvent,
@@ -233,6 +234,14 @@ class BidiGeminiLiveModel(BidiModel):
         # Handle interruption first (from server_content)
         if message.server_content and message.server_content.interrupted:
             return [BidiInterruptionEvent(reason="user_speech")]
+
+        if message.server_content and message.server_content.turn_complete:
+            return [
+                BidiResponseCompleteEvent(
+                    response_id=str(uuid.uuid4()),
+                    stop_reason="complete",
+                )
+            ]
 
         # Handle input transcription (user's speech) - emit as transcript event
         if message.server_content and message.server_content.input_transcription:
@@ -491,7 +500,9 @@ class BidiGeminiLiveModel(BidiModel):
         """
         config_dict: dict[str, Any] = self.config["inference"].copy()
 
-        config_dict["session_resumption"] = {"handle": kwargs.get("live_session_handle")}
+        config_dict["session_resumption"] = {
+            "handle": kwargs.get("live_session_handle", self._live_session_handle)
+        }
 
         # Add system instruction if provided
         if system_prompt:

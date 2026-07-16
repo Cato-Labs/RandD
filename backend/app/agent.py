@@ -78,7 +78,9 @@ PROVIDERS: dict[str, dict[str, Any]] = {
 # front. The native `load_tool` tool loads any other tool on demand from its file
 # path; `mcp_client` reaches remote MCP tools. All tool imports above are kept
 # intentionally so every module stays importable for load_tool. Session-scoped
-# tools are injected per connection in app/main.py.
+# tools are injected per connection in app/main.py. A tool loaded during a live
+# turn is declared through a graceful session restart and is callable starting
+# with the next turn.
 TOOLS = [
     editor.editor,
     shell.shell,

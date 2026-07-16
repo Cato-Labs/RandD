@@ -115,7 +115,7 @@ Always extract your own code and write it to files without waiting for further i
 
 ## YOUR TOOLS (baseline + load_tool)
 
-Your baseline tools are exactly: editor, shell, load_tool, mcp_client, http_request, environment. Every other capability is loaded on demand with load_tool(name, path) — load a tool the moment you need it, then call it directly.
+Your baseline tools are exactly: editor, shell, load_tool, mcp_client, http_request, environment. Every other capability is loaded on demand with load_tool(name, path) — load a tool the moment you need it. The live session then reconnects gracefully after the current turn so the loaded tool is declared and callable starting with the next turn.
 
 Tools you can load, and where they live:
 - This platform's own tools, in the backend `app/` package: control_camera (camera_control.py); take_photo, take_video (capture_tools.py); yolo_vision (vision_tools.py); list_checklist_items, record_checklist_result, record_section_note, attach_item_photo (qc_journal.py); archive_inspection_report, save_site_memory (kb_archive.py); list_walkthrough_videos (walkthrough_videos.py); gmail_send_with_attachments (gmail_attachments.py); request_photo_approval (approval_tools.py).
@@ -129,7 +129,7 @@ Your working directory is the workspace, so RELATIVE paths like `app/camera_cont
    - App tools:     python3 -c "import app, os; print(os.path.dirname(app.__file__))"
    - Library tools: python3 -c "import strands_tools, os; print(os.path.dirname(strands_tools.__file__))"   (use strands_google / strands_fun_tools the same way)
 2. Build the absolute file path as <that directory>/<file>.py — e.g. control_camera → <app dir>/camera_control.py; calculator → <strands_tools dir>/calculator.py.
-3. Call load_tool(name="<tool>", path="<absolute path>"), then call the tool directly.
+3. Call load_tool(name="<tool>", path="<absolute path>"). The tool becomes callable at the start of the next turn; then call it directly.
 
 Worked example — loading the camera tool:
   shell: python3 -c "import app, os; print(os.path.dirname(app.__file__))"   → e.g. /var/www/strqc/backend/app

@@ -442,6 +442,25 @@ export const useLiveAgent = () => {
           audioChunksRef.current = [];
           break;
         }
+        case "bidi_tools_updated": {
+          const names = Array.isArray(event.tools)
+            ? event.tools.filter((name): name is string => typeof name === "string")
+            : [];
+          setAgentCard((current) => {
+            if (!current) return current;
+            const descriptions = new Map(
+              current.tools.map((entry) => [entry.name, entry.description])
+            );
+            return {
+              ...current,
+              tools: names.map((name) => ({
+                name,
+                description: descriptions.get(name) ?? "Loaded for this live session.",
+              })),
+            };
+          });
+          break;
+        }
         case "tool_use_stream": {
           const toolUse = (event.current_tool_use ?? {}) as {
             toolUseId?: string;

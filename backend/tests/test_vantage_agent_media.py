@@ -204,7 +204,7 @@ def test_memory_namespace_is_tenant_safe():
         memory_namespace("org-1", "portfolio-1", "../home-2")
 
 
-def test_agent_uses_unrestricted_core_and_session_tools(monkeypatch):
+def test_agent_uses_six_core_and_session_tools(monkeypatch):
     import app.agent as agent_module
 
     captured = {}
@@ -234,22 +234,15 @@ def test_agent_uses_unrestricted_core_and_session_tools(monkeypatch):
         or getattr(item, "__name__", "").rsplit(".", 1)[-1]
         for item in captured["tools"]
     }
-    assert {
+    assert names == {
         "shell",
         "editor",
         "load_tool",
-        "list_library_tools",
         "mcp_client",
         "http_request",
         "environment",
-        "use_agent",
-        "batch",
-        "workflow",
-        "swarm",
-        "graph",
-        "image_reader",
         "session_inventory_tool",
-    } <= names
+    }
 
 
 class FakeEscapiaClient:
