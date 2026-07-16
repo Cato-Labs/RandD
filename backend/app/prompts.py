@@ -113,36 +113,13 @@ When asked to create a tool:
 
 Always extract your own code and write it to files without waiting for further instructions or relying on external extraction functions.
 
-## YOUR TOOLS (baseline + load_tool)
+## YOUR TOOLS
 
-Your baseline tools are exactly: editor, shell, load_tool, mcp_client, http_request, environment. Every other capability is loaded on demand with load_tool(name, path) — load a tool the moment you need it, then call it directly.
+Always active are the meta-tooling primitives — editor, shell, load_tool, mcp_client, http_request, environment — plus the tenant tools this session wires up for you: the native browser, perplexity_agent, the portfolio/home/room/asset onboarding tools, the tenant Slack tools, Smarty address validation, and long-term memory. The domain sections above show when each one earns its keep.
 
-Tools you can load, and where they live:
-- This platform's own tools, in the backend `app/` package: control_camera (camera_control.py); take_photo, take_video (capture_tools.py); yolo_vision (vision_tools.py); list_checklist_items, record_checklist_result, record_section_note, attach_item_photo (qc_journal.py); archive_inspection_report, save_site_memory (kb_archive.py); list_walkthrough_videos (walkthrough_videos.py); gmail_send_with_attachments (gmail_attachments.py); request_photo_approval (approval_tools.py).
-- strands_tools (strands-agents-tools): calculator, python_repl, file_read, file_write, use_agent, swarm, graph, workflow, batch, image_reader, use_aws, retrieve, think, and more.
-- strands_google: use_google (all Google APIs), google_auth, gmail_send, gmail_reply.
-- strands_fun_tools: utility, template, clipboard, and more.
+Your field tools live as @tool files in the backend `app/` package and come in on demand through load_tool: control_camera, take_photo, take_video, yolo_vision, the checklist journal (list_checklist_items, record_checklist_result, record_section_note, attach_item_photo), archive_inspection_report, save_site_memory, list_walkthrough_videos, gmail_send_with_attachments, request_photo_approval. If one isn't already active when you reach for it, load it, then use it.
 
-HOW TO LOAD A TOOL — do this exactly:
-Your working directory is the workspace, so RELATIVE paths like `app/camera_control.py` WILL FAIL with "file not found". You MUST pass load_tool an ABSOLUTE path. Get the directory with shell first, then load:
-1. Get the directory (run in shell):
-   - App tools:     python3 -c "import app, os; print(os.path.dirname(app.__file__))"
-   - Library tools: python3 -c "import strands_tools, os; print(os.path.dirname(strands_tools.__file__))"   (use strands_google / strands_fun_tools the same way)
-2. Build the absolute file path as <that directory>/<file>.py — e.g. control_camera → <app dir>/camera_control.py; calculator → <strands_tools dir>/calculator.py.
-3. Call load_tool(name="<tool>", path="<absolute path>"), then call the tool directly.
-
-Worked example — loading the camera tool:
-  shell: python3 -c "import app, os; print(os.path.dirname(app.__file__))"   → e.g. /var/www/strqc/backend/app
-  load_tool(name="control_camera", path="/var/www/strqc/backend/app/camera_control.py")
-  control_camera(action="start")
-
-Always use the following tools when appropriate:
-- editor: For writing code to files and file editing operations
-- load_tool: For loading any other tool on demand from its Python file path
-- shell: For running shell commands (also to locate a tool's file path)
-- mcp_client: For connecting to MCP servers (stdio/SSE/HTTP) and loading/calling their tools
-- http_request: For making HTTP/API requests to external services
-- environment: For reading and managing environment variables
+Anything beyond that is one load_tool away from the installed libraries — strands_tools (calculator, python_repl, file_read/file_write, use_agent, swarm, graph, workflow, batch, image_reader, use_aws, retrieve, think, tavily/exa search, and more), strands_google (use_google for any Google API, gmail_send, gmail_reply), and strands_fun_tools. load_tool wants an absolute file path, and each tool's file sits in its package directory, which shell resolves for you, e.g. `python3 -c "import strands_tools, os; print(os.path.dirname(strands_tools.__file__))"` → `<dir>/calculator.py`. Reach MCP servers with mcp_client. Prefer loading an existing tool over building one; only author a new tool (editor + load_tool) when nothing installed fits.
 
 You should detect user intents to create tools from natural language (like "create a tool that...", "build a tool for...", etc.) and handle the creation process automatically.
 """
