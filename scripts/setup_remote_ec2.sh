@@ -1,22 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# deploy_ec2.py stages this script in /tmp; never leave deploy payloads behind.
+trap 'rm -f /tmp/setup.sh' EXIT
+
 echo "=== 1. Updating System Packages ==="
 sudo apt-get update
 sudo apt-get install -y python3-pip python3-venv python3-dev nginx rsync git curl ufw
+sudo apt-get clean
 
 echo "=== 2. Setting Up Backend Python Environment ==="
 cd /var/www/strqc/backend
 # Delete existing venv to ensure clean permissions
 rm -rf venv
 python3 -m venv venv
-venv/bin/pip install --upgrade pip
-venv/bin/pip install -r requirements.txt
+venv/bin/pip install --no-cache-dir --upgrade pip
+venv/bin/pip install --no-cache-dir -r requirements.txt
 
 echo "=== 3. Setting Remote Directory Permissions for Nginx ==="
 # Ensure Nginx (www-data) can read the frontend/dist folder
 find /var/www/strqc -type d -exec chmod 755 {} +
 find /var/www/strqc -type f -exec chmod 644 {} +
+# Runtime secrets, the production database, and agent-created workspace files
+# are owned by the backend service account and are not direct Nginx assets.
+chmod 600 /var/www/strqc/.env
+find /var/www/strqc -maxdepth 1 -type f -name 'str_qc.sqlite*' -exec chmod 600 {} +
+if [ -d "/var/www/strqc/backend/workspace" ]; then
+  find /var/www/strqc/backend/workspace -type d -exec chmod 700 {} +
+  find /var/www/strqc/backend/workspace -type f -exec chmod 600 {} +
+fi
 # Restore execute permissions on binaries and scripts
 if [ -d "/var/www/strqc/backend/venv/bin" ]; then
   find /var/www/strqc/backend/venv/bin -type f -exec chmod +x {} +
@@ -147,6 +159,7 @@ User=ubuntu
 WorkingDirectory=/var/www/strqc/backend
 ExecStart=/var/www/strqc/backend/venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
+UMask=0077
 Environment=PATH=/var/www/strqc/backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EnvironmentFile=/var/www/strqc/.env
 

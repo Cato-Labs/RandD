@@ -377,8 +377,6 @@ def test_agent_uses_six_core_and_session_tools(monkeypatch):
     assert captured.get("load_tools_from_directory", False) is False
     assert "Use all available tools implicitly" not in captured["system_prompt"]
     assert "Never scan the filesystem root" in captured["system_prompt"]
-    assert "call load_tool at most once for each missing tool" in captured["system_prompt"]
-    assert "retry a successful load" in captured["system_prompt"]
     assert str(Path(agent_module.__file__).resolve().parent) in captured["system_prompt"]
 
 

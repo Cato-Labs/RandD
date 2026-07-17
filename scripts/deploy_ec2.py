@@ -201,17 +201,22 @@ subprocess.run(
 # 8. Rsync code to remote host
 print("Syncing project files to EC2 via rsync...")
 exclude_args = [
-    "--exclude", "node_modules",
-    "--exclude", "venv",
-    "--exclude", ".git",
-    "--exclude", ".ruff_cache",
-    "--exclude", "frontend/node_modules",
-    "--exclude", "**/__pycache__",
+    "--exclude", "/.env",  # uploaded separately below
+    "--exclude", "/.git/",
+    "--exclude", "/str_qc.sqlite",  # production data is host-owned
+    "--exclude", "/str_qc.sqlite.backup-*",
+    "--exclude", "/backend/venv/",  # rebuilt on the host
+    "--exclude", "/backend/workspace/",  # persistent agent workspace
+    "--exclude", "node_modules/",
+    "--exclude", ".pytest_cache/",
+    "--exclude", ".ruff_cache/",
+    "--exclude", "__pycache__/",
     "--exclude", "*.pyc",
-    "--exclude", ".env" # we will upload and configure .env separately
+    "--exclude", ".DS_Store",
+    "--exclude", "._*",
 ]
 rsync_cmd = [
-    "rsync", "-avz"
+    "rsync", "-avz", "--delete-delay", "--prune-empty-dirs"
 ] + exclude_args + [
     "-e", f"ssh -i {key_path} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
     root_dir + "/",

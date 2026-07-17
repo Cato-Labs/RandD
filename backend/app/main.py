@@ -9,8 +9,8 @@ import uvicorn
 from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from strands.tools.registry import ToolRegistry
 
 from app.agent import DEFAULT_MODEL_ID, DEFAULT_PROVIDER, PROVIDERS, TOOLS, create_agent
@@ -338,6 +338,9 @@ async def websocket_endpoint(
     ``BidiAgent.run`` owns the whole lifecycle: it starts the agent loop,
     supervises input/output tasks in the harness task group, executes tools
     concurrently, and tears everything down via ``stop_all``.
+
+    Authentication uses the short-lived, single-use organization token minted
+    by ``/api/auth/ws-token`` because browsers cannot set WebSocket headers.
     """
     if VANTAGE.token_service is None:
         await websocket.close(code=1013, reason="Vantage authentication is not configured")
@@ -372,14 +375,21 @@ async def websocket_endpoint(
 
         def associate_approval(request, resolution) -> dict[str, str]:
             return VANTAGE.repository.associate_approved_evidence(
-                context.organization_id, context.user_id,
-                inspection_id=request.inspection_id, photo_id=request.media_id,
-                item_id=request.item_id, result_id=request.result_id, asset_id=request.asset_id,
+                context.organization_id,
+                context.user_id,
+                inspection_id=request.inspection_id,
+                photo_id=request.media_id,
+                item_id=request.item_id,
+                result_id=request.result_id,
+                asset_id=request.asset_id,
                 verdict=request.proposed_verdict,
             )
 
-        registry = ApprovalRegistry(event_sink=emit_approval, associate_approval=associate_approval,
-                                    conversation_sink=emit_approval)
+        registry = ApprovalRegistry(
+            event_sink=emit_approval,
+            associate_approval=associate_approval,
+            conversation_sink=emit_approval,
+        )
 
         async def resolve_approval(payload: dict[str, Any]) -> None:
             try:
@@ -393,10 +403,15 @@ async def websocket_endpoint(
                     ),
                 )
             except Exception as exc:
-                await websocket.send_text(json.dumps({
-                    "type": "approval_error", "approvalId": payload.get("approvalId"),
-                    "error": str(exc),
-                }))
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "approval_error",
+                            "approvalId": payload.get("approvalId"),
+                            "error": str(exc),
+                        }
+                    )
+                )
 
         browser = LiveViewAgentCoreBrowser(
             region=(
