@@ -57,9 +57,9 @@ type SubmitPayload = {
   files: { url: string; mediaType: string; filename?: string }[];
 };
 
-const wsUrl = (mode: SessionMode, voice: string, provider: string, token: string) => {
+const wsUrl = (mode: SessionMode, voice: string, provider: string) => {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/ws?mode=${mode}&voice=${encodeURIComponent(voice)}&provider=${encodeURIComponent(provider)}&token=${encodeURIComponent(token)}`;
+  return `${proto}://${window.location.host}/ws?mode=${mode}&voice=${encodeURIComponent(voice)}&provider=${encodeURIComponent(provider)}`;
 };
 
 export const useLiveAgent = () => {
@@ -118,7 +118,7 @@ export const useLiveAgent = () => {
 
   const refreshAgentCard = useCallback(async () => {
     try {
-      const res = await fetch("/api/agent", { credentials: "include" });
+      const res = await fetch("/api/agent");
       if (res.ok) setAgentCard(await res.json());
     } catch {
       // backend not up yet — the connect flow surfaces errors
@@ -127,7 +127,7 @@ export const useLiveAgent = () => {
 
   const refreshWorkspace = useCallback(async () => {
     try {
-      const res = await fetch("/api/workspace", { credentials: "include" });
+      const res = await fetch("/api/workspace");
       if (res.ok) {
         const data = (await res.json()) as { files: string[] };
         setWorkspaceFiles(data.files);
@@ -140,7 +140,7 @@ export const useLiveAgent = () => {
   useEffect(() => {
     refreshAgentCard();
     refreshWorkspace();
-    fetch("/api/models", { credentials: "include" })
+    fetch("/api/models")
       .then((res) => (res.ok ? res.json() : { default: "openai", models: [] }))
       .then((data: { default: LiveModel["id"]; models: LiveModel[] }) => {
         setModels(data.models);
@@ -150,7 +150,7 @@ export const useLiveAgent = () => {
   }, [refreshAgentCard, refreshWorkspace]);
 
   useEffect(() => {
-    fetch(`/api/voices?provider=${model}`, { credentials: "include" })
+    fetch(`/api/voices?provider=${model}`)
       .then((res) => (res.ok ? res.json() : { voices: [] }))
       .then((data: { voices: LiveVoice[] }) => {
         setVoices(data.voices);
@@ -641,29 +641,8 @@ export const useLiveAgent = () => {
     await disconnect();
     setError(null);
     setStatus("connecting");
-    // Browsers cannot set WS headers, so mint a short-lived token over HTTP
-    // (cookie-authenticated) and pass it as a query param.
-    let wsToken: string;
-    try {
-      const res = await fetch("/api/auth/ws-token", {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!res.ok) {
-        setError("Not authorized for a live session — please sign in again.");
-        setStatus("disconnected");
-        setChatStatus("error");
-        return;
-      }
-      wsToken = ((await res.json()) as { token: string }).token;
-    } catch {
-      setError("WebSocket connection failed — is the backend running?");
-      setStatus("disconnected");
-      setChatStatus("error");
-      return;
-    }
     playerRef.current = new PcmPlayer(setSpeaking);
-    const socket = new WebSocket(wsUrl(mode, voice, model, wsToken));
+    const socket = new WebSocket(wsUrl(mode, voice, model));
     socketRef.current = socket;
     socket.onmessage = (message) => {
       try {
@@ -865,7 +844,6 @@ export const useLiveAgent = () => {
       const query = `section=${encodeURIComponent(section)}&duration=${clamped}`;
       await fetch(`/api/inspection/video?${query}`, {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": blob.type || "video/webm" },
         body: blob,
       });

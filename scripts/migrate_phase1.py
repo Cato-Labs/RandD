@@ -60,12 +60,8 @@ class Issue:
 
 
 class Migrator:
-    def __init__(self, conn: sqlite3.Connection, tenant_id: int = 1):
+    def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
-        # All tenant-owned INSERTs are stamped with this. Defaults to 1
-        # (RandD Tradesmen) so the original CLI behavior is unchanged; the
-        # onboarding API passes the target tenant's id.
-        self.tenant_id = int(tenant_id)
         self.issues: List[Issue] = []
         self.stage_map = self._load_stage_map()
         self.role_map = self._load_role_map()
@@ -175,16 +171,10 @@ class Migrator:
         name = (full_name or "").strip()
         if not name:
             return None
-        row = self.conn.execute(
-            "SELECT stakeholder_id FROM stakeholder WHERE full_name = ? AND tenant_id = ?",
-            (name, self.tenant_id),
-        ).fetchone()
+        row = self.conn.execute("SELECT stakeholder_id FROM stakeholder WHERE full_name = ?", (name,)).fetchone()
         if row:
             return int(row[0])
-        self.conn.execute(
-            "INSERT INTO stakeholder (full_name, tenant_id) VALUES (?, ?)",
-            (name, self.tenant_id),
-        )
+        self.conn.execute("INSERT INTO stakeholder (full_name) VALUES (?)", (name,))
         return int(self.conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
     def ensure_stakeholder_role(self, stakeholder_id: Optional[int], role_key: str, property_id: Optional[int] = None) -> None:
@@ -195,18 +185,15 @@ class Migrator:
             return
         self.conn.execute(
             """
-            INSERT OR IGNORE INTO stakeholder_role (stakeholder_id, role_id, property_id, tenant_id)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO stakeholder_role (stakeholder_id, role_id, property_id)
+            VALUES (?, ?, ?)
             """,
-            (stakeholder_id, role_id, property_id, self.tenant_id),
+            (stakeholder_id, role_id, property_id),
         )
 
     def ensure_property(self, code: str, source_name: str, row_number: int, address: str, raw_row: Dict[str, str]) -> int:
         code = code.strip().upper()
-        cur = self.conn.execute(
-            "SELECT property_id, address_line_1 FROM property WHERE unit_code = ? AND tenant_id = ?",
-            (code, self.tenant_id),
-        )
+        cur = self.conn.execute("SELECT property_id, address_line_1 FROM property WHERE unit_code = ?", (code,))
         existing = cur.fetchone()
         if existing:
             prop_id, existing_address = existing
@@ -223,10 +210,10 @@ class Migrator:
             return int(prop_id)
         self.conn.execute(
             """
-            INSERT INTO property (unit_code, address_line_1, roster_active, source_system, tenant_id)
-            VALUES (?, ?, 1, ?, ?)
+            INSERT INTO property (unit_code, address_line_1, roster_active, source_system)
+            VALUES (?, ?, 1, ?)
             """,
-            (code, address or None, source_name, self.tenant_id),
+            (code, address or None, source_name),
         )
         return int(self.conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
@@ -313,14 +300,8 @@ class Migrator:
                 property_ids[code] = prop_id
 
                 if cluster:
-                    self.conn.execute(
-                        "INSERT OR IGNORE INTO cluster (name, tenant_id) VALUES (?, ?)",
-                        (cluster, self.tenant_id),
-                    )
-                    cluster_id = self.conn.execute(
-                        "SELECT cluster_id FROM cluster WHERE name = ? AND tenant_id = ?",
-                        (cluster, self.tenant_id),
-                    ).fetchone()[0]
+                    self.conn.execute("INSERT OR IGNORE INTO cluster (name) VALUES (?)", (cluster,))
+                    cluster_id = self.conn.execute("SELECT cluster_id FROM cluster WHERE name = ?", (cluster,)).fetchone()[0]
                 else:
                     cluster_id = None
 
@@ -390,10 +371,10 @@ class Migrator:
 
                 self.conn.execute(
                     """
-                    INSERT INTO task (property_id, arrival_date, assigned_housekeeper_stakeholder_id, current_stage_definition_id, source_row_number, source_system, tenant_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO task (property_id, arrival_date, assigned_housekeeper_stakeholder_id, current_stage_definition_id, source_row_number, source_system)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (property_id, arrival_date, housekeeper_id, None, row_number, "master_checklist_csv", self.tenant_id),
+                    (property_id, arrival_date, housekeeper_id, None, row_number, "master_checklist_csv"),
                 )
                 task_id = int(self.conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
