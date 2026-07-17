@@ -1,22 +1,27 @@
 import os
+from pathlib import Path
 from typing import Any
 
 from app import _vendor  # noqa: F401  (must run before strands.experimental.bidi imports)
 from strands.experimental.bidi.agent import BidiAgent
-from strands_tools import editor, environment, http_request, load_tool, mcp_client, shell
-from strands_tools.slack import slack, slack_send_message
+from strands_tools import batch, editor, environment, http_request, image_reader, load_tool, mcp_client, shell
+from strands_tools.graph import graph
+from strands_tools.swarm import swarm
+from strands_tools.use_agent import use_agent
+from strands_tools.workflow import workflow
+
 from strands_google.google_auth import google_auth
 from strands_google.gmail_helpers import gmail_reply, gmail_send
 from strands_google.use_google import use_google
 
 from app.camera_control import control_camera
+from app.approval_tools import request_photo_approval
 from app.capture_tools import take_photo, take_video
 from app.gmail_attachments import gmail_send_with_attachments
 from app.kb_archive import archive_inspection_report, save_site_memory
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
-from app.slack_report import send_report_to_slack
-from app.walkthrough_videos import list_walkthrough_videos, send_video_to_slack
+from app.walkthrough_videos import list_walkthrough_videos
 from app.qc_journal import (
     attach_item_photo,
     list_checklist_items,
@@ -70,44 +75,20 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 
+# Baseline registry: only the native meta-tooling primitives are registered up
+# front. The native `load_tool` tool loads any other tool on demand from its file
+# path; `mcp_client` reaches remote MCP tools. All tool imports above are kept
+# intentionally so every module stays importable for load_tool. Session-scoped
+# tools are injected per connection in app/main.py. A tool loaded during a live
+# turn is declared through a graceful session restart and is callable starting
+# with the next turn.
 TOOLS = [
     editor.editor,
     shell.shell,
     load_tool.load_tool,
-    list_library_tools,
     mcp_client.mcp_client,
-    http_request,  # module-based tool (TOOL_SPEC + function)
-    environment,  # module-based tool (TOOL_SPEC + function)
-    # QC turnover inspection journal (routes to the live checklist form)
-    list_checklist_items,
-    record_checklist_result,
-    record_section_note,
-    attach_item_photo,
-    # Inspector's browser camera (frontend executes the start/stop/snap)
-    control_camera,
-    # Slack delivery (Addendum 1): reports via files_upload_v2, notes via messages
-    slack,
-    slack_send_message,
-    # Reliable inspection-form delivery (resolves the path itself; preferred)
-    send_report_to_slack,
-    # Google Workspace (strands-google): 200+ APIs via service account / OAuth
-    use_google,
-    google_auth,
-    gmail_send,
-    gmail_reply,
-    gmail_send_with_attachments,
-    # Device-camera capture: browser stream first, server hardware fallback
-    take_photo,
-    take_video,
-    # Access recorded walkthrough clips after the fact (list + deliver)
-    list_walkthrough_videos,
-    send_video_to_slack,
-    # Archive the latest inspection form into the KB's S3 bucket (memory + artifact)
-    archive_inspection_report,
-    # Per-house site memories that don't come from inspections
-    save_site_memory,
-    # YOLO object detection over the device-camera stream
-    yolo_vision,
+    http_request,
+    environment,
 ]
 
 
@@ -130,13 +111,10 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
         api_key = os.getenv("GOOGLE_API_KEY")
 
         thinking_level = os.getenv("GEMINI_THINKING_LEVEL") or os.getenv("STRQC_GEMINI_THINKING_LEVEL", "HIGH")
-        enable_search_str = os.getenv("GEMINI_ENABLE_SEARCH") or os.getenv("STRQC_GEMINI_ENABLE_SEARCH", "false")
-        enable_search = enable_search_str.lower() in ("true", "1", "yes")
 
         inference_config = {}
         if thinking_level:
             inference_config["thinking_config"] = {"thinking_level": thinking_level}
-        inference_config["enable_search"] = enable_search
         provider_config["inference"] = inference_config
 
         return BidiGeminiLiveModel(
@@ -173,19 +151,25 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
 
 
 def create_agent(
-    mode: str, voice: str, provider: str = DEFAULT_PROVIDER, tenant_id: int | None = None
+    mode: str,
+    voice: str,
+    provider: str = DEFAULT_PROVIDER,
+    *,
+    session_tools: list[Any] | None = None,
 ) -> BidiAgent:
-    """Create one BidiAgent per connection, on the requested vended provider.
-
-    ``tenant_id`` is bound into the agent's session state so future DB-backed
-    tools stay tenant-scoped (read via ``ctx.agent.state.get("tenant_id")``).
-    """
+    """Create one BidiAgent per connection, on the requested vended provider."""
     model = build_model(provider, mode, voice)
+    app_tool_directory = Path(__file__).resolve().parent
+    runtime_prompt = (
+        f"{SYSTEM_PROMPT}\n\n## RUNTIME TOOL PATHS\n"
+        f"App tool directory: {app_tool_directory}\n"
+        "Use this exact directory for app tools. Never scan the filesystem root "
+        "or search unrelated directories for tools."
+    )
     return BidiAgent(
         model=model,
-        tools=TOOLS + memory_tools(),
-        system_prompt=SYSTEM_PROMPT,
-        name="RandD Live",
-        description="Real-time Gemini Live meta-tooling agent (editor, shell, load_tool).",
-        state={"tenant_id": tenant_id},
+        tools=TOOLS + list(session_tools or ()) + memory_tools(),
+        system_prompt=runtime_prompt,
+        name="Vantage AI",
+        description="Tenant-scoped real-time field operations and property inspection agent.",
     )

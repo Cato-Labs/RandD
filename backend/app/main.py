@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -22,15 +24,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 from strands.tools.registry import ToolRegistry
 
 from app import auth
 from app.agent import DEFAULT_MODEL_ID, DEFAULT_PROVIDER, PROVIDERS, TOOLS, create_agent
+from app.agentcore_browser import LiveViewAgentCoreBrowser
 from app import browser_camera
+from app.inventory_tools import build_inventory_tools
 from app.io import BidiWebSocketInput, BidiWebSocketOutput
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
+from app.perplexity_agent import perplexity_agent
+from app.smarty_mcp import SmartyMCPConfigurationError, create_smarty_mcp_client
 from app.transcribe import compress_clip, measure_loudness, transcribe_audio
+from app.approval_registry import ApprovalRegistry, ApprovalResolution
+from app.approval_tools import approval_scope
+from app.vantage.api import create_vantage_router
+from app.vantage.auth_api import create_auth_router, session_context
+from app.vantage.google_day_api import create_google_day_router
+from app.vantage.runtime import build_runtime
 
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
@@ -38,15 +51,51 @@ os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent / "workspace"
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="RandD Live Backend")
+app = FastAPI(title="Vantage AI Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://44-193-208-77.sslip.io", "http://localhost:5173"],
+    allow_origins=[origin.strip() for origin in os.getenv("VANTAGE_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.mount("/workspace", StaticFiles(directory=WORKSPACE_DIR), name="workspace")
+
+VANTAGE = build_runtime()
+_session_dependency = session_context(VANTAGE)
+
+
+@app.middleware("http")
+async def protect_tenant_surfaces(request: Request, call_next):
+    """Keep legacy field/media routes behind the same verified session.
+
+    New Vantage routers also authorize entity access; this middleware closes
+    the older unscoped HTTP entry points while they are incrementally ported.
+    """
+    public = {"/api/auth/code/request", "/api/auth/code/verify"}
+    protected = request.url.path.startswith((
+        "/api/field", "/api/inspection", "/api/properties", "/api/inspectors",
+        "/api/workspace", "/workspace",
+    ))
+    if protected and request.url.path not in public:
+        try:
+            VANTAGE.context_from_token(request.cookies.get("vantage_session"))
+        except Exception:
+            return JSONResponse(status_code=401, content={"error": {
+                "code": "not_authenticated", "message": "A valid Vantage session is required",
+                "retryable": False, "fields": {},
+            }})
+    return await call_next(request)
+
+app.include_router(create_auth_router(VANTAGE))
+app.include_router(create_vantage_router(VANTAGE.repository, _session_dependency, VANTAGE.media_service))
+app.include_router(create_google_day_router(
+    calendar=VANTAGE.calendar,
+    places=VANTAGE.places,
+    navigation=VANTAGE.navigation,
+    context_dependency=_session_dependency,
+))
 
 REPORTS_DIR = WORKSPACE_DIR / "reports"
 LATEST_REPORT = REPORTS_DIR / "inspection-report-latest.html"
@@ -388,7 +437,7 @@ def tool_list() -> list[dict[str, str]]:
     global _tool_list_cache
     if _tool_list_cache is None:
         registry = ToolRegistry()
-        registry.process_tools(TOOLS + memory_tools())
+        registry.process_tools(TOOLS)
         tools = []
         for spec in registry.get_all_tool_specs():
             description = str(spec.get("description", ""))
@@ -402,7 +451,7 @@ def tool_list() -> list[dict[str, str]]:
 @app.get("/api/agent")
 async def get_agent(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     return {
-        "name": "RandD Live",
+        "name": "Vantage AI",
         "model": os.getenv("GEMINI_LIVE_MODEL", DEFAULT_MODEL_ID),
         "instructions": SYSTEM_PROMPT,
         "tools": tool_list(),
@@ -453,6 +502,45 @@ async def get_inspectors(user: dict[str, Any] = Depends(auth.current_user)) -> d
     return {"inspectors": await run_in_threadpool(list_inspectors, user["tenant_id"])}
 
 
+# ── Field app (Vantage mobile) read endpoints — real data, additive only ─────
+
+
+@app.get("/api/field/clusters")
+async def field_clusters() -> dict[str, Any]:
+    from app.field_api import list_clusters
+
+    return {"clusters": await run_in_threadpool(list_clusters)}
+
+
+@app.get("/api/field/day")
+async def field_day(cluster: int | None = Query(default=None)) -> dict[str, Any]:
+    from app.field_api import list_day
+
+    return {"tasks": await run_in_threadpool(list_day, cluster)}
+
+
+@app.get("/api/field/property/{property_id}")
+async def field_property(property_id: int) -> dict[str, Any]:
+    from app.field_api import property_detail
+
+    detail = await run_in_threadpool(property_detail, property_id)
+    return detail or {}
+
+
+@app.get("/api/field/checklist")
+async def field_checklist() -> dict[str, Any]:
+    from app.field_api import checklist
+
+    return {"sections": await run_in_threadpool(checklist)}
+
+
+@app.get("/api/field/notifications")
+async def field_notifications() -> dict[str, Any]:
+    from app.field_api import list_notifications
+
+    return {"notifications": await run_in_threadpool(list_notifications)}
+
+
 @app.get("/api/workspace")
 async def get_workspace(user: dict[str, Any] = Depends(auth.current_user)) -> dict[str, Any]:
     files = [
@@ -466,6 +554,7 @@ async def get_workspace(user: dict[str, Any] = Depends(auth.current_user)) -> di
 @app.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
+    token: str = Query(...),
     mode: str = Query("audio", pattern="^(audio|text)$"),
     voice: str = Query("Puck"),
     provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$"),
@@ -481,6 +570,16 @@ async def websocket_endpoint(
     is required as a query param because browsers cannot set WS headers. It is
     validated at accept() and its ``tenant_id`` is bound into the agent.
     """
+    if VANTAGE.token_service is None:
+        await websocket.close(code=1013, reason="Vantage authentication is not configured")
+        return
+    try:
+        claims = VANTAGE.token_service.consume_ws_token(token)
+        context = VANTAGE.context_from_claims(claims)
+    except Exception:
+        await websocket.close(code=4401, reason="Invalid or replayed WebSocket token")
+        return
+    session_id = str(claims["jti"])
     await websocket.accept()
     # Validate the WS token before doing anything else; on failure reuse the
     # existing bidi_error-to-browser + close pattern.
@@ -508,6 +607,43 @@ async def websocket_endpoint(
             outputs=[BidiWebSocketOutput(websocket)],
             invocation_state={"tenant_id": tenant_id},
         )
+
+        async def resolve_browser_control(payload: dict[str, Any]) -> None:
+            await run_in_threadpool(browser.handle_control, payload)
+
+        session_tools = [
+            browser.browser,
+            perplexity_agent,
+            *build_inventory_tools(VANTAGE.repository, context),
+        ]
+        with ExitStack() as stack:
+            try:
+                smarty = stack.enter_context(create_smarty_mcp_client())
+                session_tools.extend(smarty.list_tools_sync())
+            except SmartyMCPConfigurationError:
+                pass
+            except Exception:
+                await websocket.send_text(json.dumps({
+                    "type": "integration_warning",
+                    "integration": "smarty",
+                    "message": "Smarty MCP is temporarily unavailable",
+                }))
+
+            agent = create_agent(
+                mode=mode,
+                voice=voice,
+                provider=provider,
+                session_tools=session_tools,
+            )
+            with browser_camera.session_scope(session_id), approval_scope(session_id, registry):
+                await agent.run(
+                    inputs=[BidiWebSocketInput(
+                        websocket,
+                        approval_resolver=resolve_approval,
+                        browser_control_resolver=resolve_browser_control,
+                    )],
+                    outputs=[BidiWebSocketOutput(websocket)],
+                )
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -515,6 +651,10 @@ async def websocket_endpoint(
             await websocket.send_text(json.dumps({"type": "bidi_error", "error": str(exc)}))
         except Exception:
             pass
+    finally:
+        browser_camera.discard_session(session_id)
+        if "browser" in locals():
+            browser.close_all()
 
 
 if __name__ == "__main__":

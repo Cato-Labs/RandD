@@ -17,6 +17,10 @@ import {
 } from "@/lib/audio";
 import { CameraCapture } from "@/lib/camera";
 import type {
+  YoloDetection,
+  YoloDetectionFrame,
+} from "@/components/YoloOverlay";
+import type {
   AgentCard,
   ConnectionStatus,
   LiveMessage,
@@ -33,8 +37,18 @@ import type {
 } from "@/lib/live-types";
 
 const MIC_SAMPLE_RATE = 16000;
+const BROWSER_LIVE_VIEW_REFRESH_MS = 4 * 60 * 1000;
 
 type ChatStatus = "ready" | "submitted" | "streaming" | "error";
+
+type BrowserSession = {
+  sessionName: string;
+  liveViewUrl: string;
+  currentPageUrl: string;
+  status: string;
+};
+
+type BrowserControlState = "agent" | "human" | "closed" | "error";
 
 type ServerEvent = Record<string, unknown> & { type: string };
 
@@ -66,11 +80,16 @@ export const useLiveAgent = () => {
   const [cameraDeviceId, setCameraDeviceId] = useState<string | undefined>();
   const [cameraFacing, setCameraFacingState] = useState<"environment" | "user">("environment");
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [yoloDetectionFrame, setYoloDetectionFrame] =
+    useState<YoloDetectionFrame | null>(null);
   const [recording, setRecording] = useState(false);
   const [agentCard, setAgentCard] = useState<AgentCard | null>(null);
   const [voices, setVoices] = useState<LiveVoice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  const [browserSession, setBrowserSession] = useState<BrowserSession | null>(null);
+  const [browserControlState, setBrowserControlState] =
+    useState<BrowserControlState>("agent");
 
   const socketRef = useRef<WebSocket | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -338,6 +357,25 @@ export const useLiveAgent = () => {
           sessionStartRef.current = performance.now();
           break;
         }
+        case "browser_session": {
+          const sessionName = String(event.sessionName ?? "");
+          if (!sessionName) break;
+          setBrowserSession((current) => ({
+            sessionName,
+            liveViewUrl: String(event.liveViewUrl ?? current?.liveViewUrl ?? ""),
+            currentPageUrl: String(
+              event.currentPageUrl ?? current?.currentPageUrl ?? ""
+            ),
+            status: String(event.status ?? current?.status ?? "active"),
+          }));
+          break;
+        }
+        case "browser_control": {
+          const state = String(event.state ?? "error") as BrowserControlState;
+          setBrowserControlState(state);
+          if (state === "closed") setBrowserSession(null);
+          break;
+        }
         case "bidi_response_start": {
           setChatStatus("streaming");
           break;
@@ -408,6 +446,53 @@ export const useLiveAgent = () => {
         case "bidi_interruption": {
           playerRef.current?.flush();
           audioChunksRef.current = [];
+          break;
+        }
+        case "yolo_detections": {
+          const width = Number(event.width);
+          const height = Number(event.height);
+          const timestamp = Number(event.timestamp);
+          const detections = Array.isArray(event.detections)
+            ? event.detections.filter((value): value is YoloDetection => {
+                if (!value || typeof value !== "object") return false;
+                const detection = value as Partial<YoloDetection>;
+                return (
+                  typeof detection.label === "string" &&
+                  [
+                    detection.x1,
+                    detection.y1,
+                    detection.x2,
+                    detection.y2,
+                    detection.confidence,
+                    detection.classId,
+                  ].every((item) => typeof item === "number" && Number.isFinite(item))
+                );
+              })
+            : [];
+          setYoloDetectionFrame(
+            Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0
+              ? { width, height, timestamp, detections }
+              : null
+          );
+          break;
+        }
+        case "bidi_tools_updated": {
+          const names = Array.isArray(event.tools)
+            ? event.tools.filter((name): name is string => typeof name === "string")
+            : [];
+          setAgentCard((current) => {
+            if (!current) return current;
+            const descriptions = new Map(
+              current.tools.map((entry) => [entry.name, entry.description])
+            );
+            return {
+              ...current,
+              tools: names.map((name) => ({
+                name,
+                description: descriptions.get(name) ?? "Loaded for this live session.",
+              })),
+            };
+          });
           break;
         }
         case "tool_use_stream": {
@@ -541,10 +626,13 @@ export const useLiveAgent = () => {
     cameraRef.current = null;
     setCameraActive(false);
     setCameraStream(null);
+    setYoloDetectionFrame(null);
     await playerRef.current?.close();
     playerRef.current = null;
     socketRef.current?.close();
     socketRef.current = null;
+    setBrowserSession(null);
+    setBrowserControlState("agent");
     setStatus("disconnected");
     setChatStatus("ready");
   }, []);
@@ -587,6 +675,7 @@ export const useLiveAgent = () => {
     socket.onclose = () => {
       setStatus("disconnected");
       setMicActive(false);
+      setYoloDetectionFrame(null);
     };
     socket.onerror = () => {
       setError("WebSocket connection failed — is the backend running?");
@@ -691,6 +780,7 @@ export const useLiveAgent = () => {
     cameraRef.current = null;
     setCameraActive(false);
     setCameraStream(null);
+    setYoloDetectionFrame(null);
   }, []);
 
   /** Pick a specific camera by deviceId (any webcam / built-in / USB / phone lens). */
@@ -817,6 +907,46 @@ export const useLiveAgent = () => {
     [deliver]
   );
 
+  const sendBrowserControl = useCallback(
+    (action: "take" | "release" | "refresh_live_view") => {
+      if (!browserSession?.sessionName) return;
+      sendRaw({
+        type: "browser_control",
+        action,
+        sessionName: browserSession.sessionName,
+      });
+    },
+    [browserSession?.sessionName, sendRaw]
+  );
+
+  const takeBrowserControl = useCallback(
+    () => sendBrowserControl("take"),
+    [sendBrowserControl]
+  );
+
+  const releaseBrowserControl = useCallback(
+    () => sendBrowserControl("release"),
+    [sendBrowserControl]
+  );
+
+  const refreshBrowserLiveView = useCallback(
+    () => sendBrowserControl("refresh_live_view"),
+    [sendBrowserControl]
+  );
+
+  useEffect(() => {
+    if (!browserSession?.sessionName || !browserSession.liveViewUrl) return;
+    const timer = window.setTimeout(
+      refreshBrowserLiveView,
+      BROWSER_LIVE_VIEW_REFRESH_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [
+    browserSession?.sessionName,
+    browserSession?.liveViewUrl,
+    refreshBrowserLiveView,
+  ]);
+
   const cancelQueued = useCallback((id: string) => {
     setQueue((prev) => prev.filter((entry) => entry.id !== id));
   }, []);
@@ -883,6 +1013,7 @@ export const useLiveAgent = () => {
     cameraDeviceId,
     cameraFacing,
     cameraStream,
+    yoloDetectionFrame,
     recording,
     startCamera,
     stopCamera,
@@ -895,6 +1026,11 @@ export const useLiveAgent = () => {
     agentCard,
     workspaceFiles,
     refreshWorkspace,
+    browserSession,
+    browserControlState,
+    takeBrowserControl,
+    releaseBrowserControl,
+    refreshBrowserLiveView,
   };
 };
 

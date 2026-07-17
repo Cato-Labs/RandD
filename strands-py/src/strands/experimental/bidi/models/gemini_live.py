@@ -36,7 +36,6 @@ from ..types.events import (
     BidiInterruptionEvent,
     BidiOutputEvent,
     BidiResponseCompleteEvent,
-    BidiResponseStartEvent,
     BidiTextInputEvent,
     BidiTranscriptStreamEvent,
     BidiUsageEvent,
@@ -97,10 +96,7 @@ class BidiGeminiLiveModel(BidiModel):
         self._live_session_context_manager: Any = None
         self._live_session_handle: str | None = None
         self._connection_id: str | None = None
-        # Open response turn (None between turns). Gemini has no response id of
-        # its own, so we mint one per turn to emit the response start/complete
-        # events the agent loop and clients expect from every provider.
-        self._response_id: str | None = None
+        self._tool_names_by_id: dict[str, str] = {}
 
     def _resolve_client_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Resolve client config (sets default http_options if not provided)."""
@@ -167,8 +163,10 @@ class BidiGeminiLiveModel(BidiModel):
         )
         self._live_session = await self._live_session_context_manager.__aenter__()
 
-        # Gemini itself restores message history when resuming from session
-        if messages and "live_session_handle" not in kwargs:
+        # Gemini restores conversation history when the live session is resumed.
+        # Replaying messages as well would duplicate the conversation and can
+        # make the model repeat tool calls that already completed.
+        if messages and self._live_session_handle is None:
             await self._send_message_history(messages)
 
     async def _send_message_history(self, messages: Messages) -> None:
@@ -208,51 +206,6 @@ class BidiGeminiLiveModel(BidiModel):
                 for event in self._convert_gemini_live_event(message):
                     yield event
 
-    def _open_response(self, events: list[BidiOutputEvent]) -> list[BidiOutputEvent]:
-        """Prepend a response start event when this is the first content of a turn."""
-        if self._response_id is None:
-            self._response_id = str(uuid.uuid4())
-            return [BidiResponseStartEvent(response_id=self._response_id), *events]
-        return events
-
-    def _extract_grounding_metadata(self, grounding_metadata: Any) -> list[dict[str, Any]]:
-        """Extract web/image chunks and queries from GroundingMetadata."""
-        gm = grounding_metadata
-        queries = []
-        if gm.web_search_queries:
-            queries = list(gm.web_search_queries)
-        elif gm.retrieval_queries:
-            queries = list(gm.retrieval_queries)
-
-        chunks = []
-        if gm.grounding_chunks:
-            for chunk in gm.grounding_chunks:
-                if chunk.web:
-                    chunks.append({
-                        "type": "web",
-                        "title": chunk.web.title,
-                        "uri": chunk.web.uri,
-                        "domain": chunk.web.domain or ""
-                    })
-                elif chunk.image:
-                    chunks.append({
-                        "type": "image",
-                        "title": chunk.image.title or "",
-                        "uri": chunk.image.source_uri or chunk.image.image_uri or "",
-                        "image_uri": chunk.image.image_uri or "",
-                        "domain": chunk.image.domain or ""
-                    })
-
-        if queries or chunks:
-            return [
-                {
-                    "type": "bidi_grounding_metadata",
-                    "queries": queries,
-                    "chunks": chunks
-                }
-            ]
-        return []
-
     def _convert_gemini_live_event(self, message: LiveServerMessage) -> list[BidiOutputEvent]:
         """Convert Gemini Live API events to provider-agnostic format.
 
@@ -281,22 +234,17 @@ class BidiGeminiLiveModel(BidiModel):
                 logger.debug("session_handle=<%s> | updating gemini session handle", self._live_session_handle)
             return []
 
-        events: list[BidiOutputEvent] = []
-
         # Handle interruption first (from server_content)
         if message.server_content and message.server_content.interrupted:
-            events.append(BidiInterruptionEvent(reason="user_speech"))
-            if self._response_id:
-                events.append(BidiResponseCompleteEvent(response_id=self._response_id, stop_reason="interrupted"))
-                self._response_id = None
-            return events
+            return [BidiInterruptionEvent(reason="user_speech")]
 
-        # End of turn: close the open response so clients can advance their
-        # turn state (queued input, UI status). Matches nova/openai behavior.
         if message.server_content and message.server_content.turn_complete:
-            if self._response_id:
-                events.append(BidiResponseCompleteEvent(response_id=self._response_id, stop_reason="complete"))
-                self._response_id = None
+            return [
+                BidiResponseCompleteEvent(
+                    response_id=str(uuid.uuid4()),
+                    stop_reason="complete",
+                )
+            ]
 
         # Handle input transcription (user's speech) - emit as transcript event
         if message.server_content and message.server_content.input_transcription:
@@ -305,7 +253,7 @@ class BidiGeminiLiveModel(BidiModel):
             if hasattr(input_transcript, "text") and input_transcript.text:
                 transcription_text = input_transcript.text
                 logger.debug("text_length=<%d> | gemini input transcription detected", len(transcription_text))
-                events.append(
+                return [
                     BidiTranscriptStreamEvent(
                         delta={"text": transcription_text},
                         text=transcription_text,
@@ -314,7 +262,7 @@ class BidiGeminiLiveModel(BidiModel):
                         is_final=bool(input_transcript.finished),
                         current_transcript=transcription_text,
                     )
-                )
+                ]
 
         # Handle output transcription (model's audio) - emit as transcript event
         if message.server_content and message.server_content.output_transcription:
@@ -323,7 +271,7 @@ class BidiGeminiLiveModel(BidiModel):
             if hasattr(output_transcript, "text") and output_transcript.text:
                 transcription_text = output_transcript.text
                 logger.debug("text_length=<%d> | gemini output transcription detected", len(transcription_text))
-                events.append(
+                return [
                     BidiTranscriptStreamEvent(
                         delta={"text": transcription_text},
                         text=transcription_text,
@@ -332,56 +280,62 @@ class BidiGeminiLiveModel(BidiModel):
                         is_final=bool(output_transcript.finished),
                         current_transcript=transcription_text,
                     )
-                )
+                ]
 
         # Handle audio output using SDK's built-in data property
         # Check this BEFORE text to avoid triggering warning on mixed content
         if message.data:
             # Convert bytes to base64 string for JSON serializability
             audio_b64 = base64.b64encode(message.data).decode("utf-8")
-            events.append(
+            return [
                 BidiAudioStreamEvent(
                     audio=audio_b64,
                     format="pcm",
                     sample_rate=cast(AudioSampleRate, self.config["audio"]["output_rate"]),
                     channels=cast(AudioChannel, self.config["audio"]["channels"]),
                 )
-            )
+            ]
 
         # Handle text output from model_turn (avoids warning by checking parts directly)
         if message.server_content and message.server_content.model_turn:
             model_turn = message.server_content.model_turn
             if model_turn.parts:
+                # Concatenate all text parts (Gemini may send multiple parts)
+                text_parts = []
                 for part in model_turn.parts:
+                    # Check if part has text attribute and it's not empty
                     if hasattr(part, "text") and part.text:
-                        is_thought = getattr(part, "thought", False)
-                        evt = BidiTranscriptStreamEvent(
-                            delta={"text": part.text},
-                            text=part.text,
+                        text_parts.append(part.text)
+
+                if text_parts:
+                    full_text = " ".join(text_parts)
+                    return [
+                        BidiTranscriptStreamEvent(
+                            delta={"text": full_text},
+                            text=full_text,
                             role="assistant",
                             is_final=True,
-                            current_transcript=part.text,
+                            current_transcript=full_text,
                         )
-                        evt["thought"] = bool(is_thought)
-                        events.append(evt)
-
-        # Handle grounding metadata (if present in server_content)
-        if message.server_content and message.server_content.grounding_metadata:
-            gm_events = self._extract_grounding_metadata(message.server_content.grounding_metadata)
-            events.extend(gm_events)
+                    ]
 
         # Handle tool calls - return list to support multiple tool calls
         if message.tool_call and message.tool_call.function_calls:
+            tool_events: list[BidiOutputEvent] = []
             for func_call in message.tool_call.function_calls:
+                tool_use_id = cast(str, func_call.id)
+                tool_name = cast(str, func_call.name)
+                self._tool_names_by_id[tool_use_id] = tool_name
                 tool_use_event: ToolUse = {
-                    "toolUseId": cast(str, func_call.id),
-                    "name": cast(str, func_call.name),
+                    "toolUseId": tool_use_id,
+                    "name": tool_name,
                     "input": func_call.args or {},
                 }
                 # Create ToolUseStreamEvent for consistency with standard agent
-                events.append(
+                tool_events.append(
                     ToolUseStreamEvent(delta={"toolUse": tool_use_event}, current_tool_use=dict(tool_use_event))
                 )
+            return tool_events
 
         # Handle usage metadata
         if hasattr(message, "usage_metadata") and message.usage_metadata:
@@ -416,7 +370,7 @@ class BidiGeminiLiveModel(BidiModel):
                                 {"modality": modality_str, "input_tokens": 0, "output_tokens": detail.token_count}
                             )
 
-            events.append(
+            return [
                 BidiUsageEvent(
                     input_tokens=usage.prompt_token_count or 0,
                     output_tokens=usage.response_token_count or 0,
@@ -426,19 +380,7 @@ class BidiGeminiLiveModel(BidiModel):
                     if usage.cached_content_token_count
                     else None,
                 )
-            )
-
-        if events:
-            # Only open response if we actually have stream content (transcripts, audio, tools)
-            # which BidiResponseStartEvent should prepend.
-            has_content = any(
-                isinstance(e, (BidiTranscriptStreamEvent, BidiAudioStreamEvent, ToolUseStreamEvent))
-                or (isinstance(e, dict) and e.get("type") == "bidi_grounding_metadata")
-                for e in events
-            )
-            if has_content:
-                return self._open_response(events)
-            return events
+            ]
 
         # Silently ignore setup_complete and generation_complete messages
         return []
@@ -492,16 +434,12 @@ class BidiGeminiLiveModel(BidiModel):
     async def _send_image_content(self, image_input: BidiImageInputEvent) -> None:
         """Internal: Send image content using Gemini Live API.
 
-        Sends image frames as realtime input media. Uses ``send_realtime_input``
-        (the supported replacement for the deprecated ``AsyncSession.send``),
-        decoding the event's base64 payload into a media blob.
+        Send camera frames through the SDK's realtime video input channel.
         """
-        image_bytes = base64.b64decode(image_input.image)
-        image_blob = genai_types.Blob(data=image_bytes, mime_type=image_input.mime_type)
-
-        # media= maps to realtime_input.media_chunks, which the Live API now
-        # rejects with 1007 ("media_chunks is deprecated. Use audio, video, or
-        # text instead") — killing the session on the first camera frame.
+        image_blob = genai_types.Blob(
+            data=base64.b64decode(image_input.image),
+            mime_type=image_input.mime_type,
+        )
         await self._live_session.send_realtime_input(video=image_blob)
 
     async def _send_text_content(self, text: str) -> None:
@@ -534,9 +472,10 @@ class BidiGeminiLiveModel(BidiModel):
             result_data = {"result": content}
 
         # Create function response
+        tool_name = self._tool_names_by_id.pop(cast(str, tool_use_id), cast(str, tool_use_id))
         func_response = genai_types.FunctionResponse(
             id=tool_use_id,
-            name=tool_use_id,  # Gemini uses name as identifier
+            name=tool_name,
             response=result_data,
         )
 
@@ -554,7 +493,6 @@ class BidiGeminiLiveModel(BidiModel):
 
         async def stop_connection() -> None:
             self._connection_id = None
-            self._response_id = None
 
         await stop_all(stop_session, stop_connection)
 
@@ -568,24 +506,17 @@ class BidiGeminiLiveModel(BidiModel):
         """
         config_dict: dict[str, Any] = self.config["inference"].copy()
 
-        config_dict["session_resumption"] = {"handle": kwargs.get("live_session_handle")}
+        config_dict["session_resumption"] = {
+            "handle": kwargs.get("live_session_handle", self._live_session_handle)
+        }
 
         # Add system instruction if provided
         if system_prompt:
             config_dict["system_instruction"] = system_prompt
 
         # Add tools if provided
-        api_tools = []
         if tools:
-            api_tools = self._format_tools_for_live_api(tools)
-
-        # Enable native Google Search grounding if configured
-        if config_dict.pop("enable_search", False):
-            from google.genai import types as genai_types
-            api_tools.append(genai_types.Tool(google_search=genai_types.GoogleSearch()))
-
-        if api_tools:
-            config_dict["tools"] = api_tools
+            config_dict["tools"] = self._format_tools_for_live_api(tools)
 
         if "voice" in self.config["audio"]:
             config_dict.setdefault("speech_config", {}).setdefault("voice_config", {}).setdefault(

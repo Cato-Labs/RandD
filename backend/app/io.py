@@ -7,13 +7,17 @@ input reading, event fan-out, task-group supervision, and ``stop_all``
 cleanup. We do not hand-roll a bridge around ``send``/``receive``.
 """
 
+import asyncio
 import base64
 import json
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 from fastapi import WebSocket
 
 from app import _vendor  # noqa: F401  (vendored bidi must shadow pip copy)
+from app import browser_camera
 from strands.experimental.bidi.types.events import (
     BidiAudioInputEvent,
     BidiImageInputEvent,
@@ -40,8 +44,16 @@ def _sanitize(value: Any) -> Any:
 class BidiWebSocketInput:
     """BidiInput protocol: reads browser frames, yields vendored TypedEvents."""
 
-    def __init__(self, websocket: WebSocket) -> None:
+    def __init__(
+        self,
+        websocket: WebSocket,
+        *,
+        approval_resolver: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        browser_control_resolver: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> None:
         self._websocket = websocket
+        self._approval_resolver = approval_resolver
+        self._browser_control_resolver = browser_control_resolver
 
     async def start(self, agent: Any) -> None:  # noqa: ANN401 (protocol signature)
         return
@@ -56,6 +68,32 @@ class BidiWebSocketInput:
             if not isinstance(data, dict):
                 continue
             event_type = data.pop("type", None)
+            if event_type == "user_message":
+                text = str(data.get("text") or "").strip()
+                if text:
+                    return BidiTextInputEvent(text=text)
+                continue
+            if event_type == "approval_resolved":
+                if self._approval_resolver is not None:
+                    await self._approval_resolver(data)
+                continue
+            if event_type == "browser_control":
+                if self._browser_control_resolver is not None:
+                    await self._browser_control_resolver(data)
+                continue
+            if event_type == "camera_capture":
+                encoded = data.get("dataUrl")
+                if not isinstance(encoded, str) or not encoded:
+                    continue
+                mime_type = str(data.get("mimeType") or "image/jpeg")
+                if encoded.startswith("data:") and "," in encoded:
+                    header, encoded = encoded.split(",", 1)
+                    if ";base64" in header:
+                        mime_type = header[5:].split(";", 1)[0] or mime_type
+                from app.browser_camera import add_frame
+
+                add_frame(encoded)
+                return BidiImageInputEvent(image=encoded, mime_type=mime_type)
             if event_type == "bidi_text_input":
                 return BidiTextInputEvent(**data)
             if event_type == "bidi_audio_input":
@@ -81,12 +119,36 @@ class BidiWebSocketOutput:
     def __init__(self, websocket: WebSocket) -> None:
         self._websocket = websocket
         self._tool_uses: dict[str, dict[str, Any]] = {}
+        self._send_lock = asyncio.Lock()
+        self._detection_task: asyncio.Task[None] | None = None
 
     async def start(self, agent: Any) -> None:  # noqa: ANN401 (protocol signature)
-        return
+        self._detection_task = asyncio.create_task(self._forward_yolo_detections())
 
     async def stop(self) -> None:
-        return
+        if self._detection_task is None:
+            return
+        self._detection_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await self._detection_task
+        self._detection_task = None
+
+    async def _send(self, payload: dict[str, Any]) -> None:
+        async with self._send_lock:
+            await self._websocket.send_text(json.dumps(payload, default=str))
+
+    async def _forward_yolo_detections(self) -> None:
+        sequence = 0
+        while True:
+            event = await asyncio.to_thread(
+                browser_camera.wait_for_detections,
+                sequence,
+                0.5,
+            )
+            if event is None:
+                continue
+            sequence, payload = event
+            await self._send(payload)
 
     async def __call__(self, event: BidiOutputEvent) -> None:
         outgoing = _sanitize(dict(event))
@@ -111,4 +173,4 @@ class BidiWebSocketOutput:
             outgoing["output_tokens"] = outgoing.get("output_tokens", outgoing.get("outputTokens", 0))
             outgoing["total_tokens"] = outgoing.get("total_tokens", outgoing.get("totalTokens", 0))
 
-        await self._websocket.send_text(json.dumps(outgoing, default=str))
+        await self._send(outgoing)

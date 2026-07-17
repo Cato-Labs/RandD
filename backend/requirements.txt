@@ -1,9 +1,11 @@
 fastapi>=0.139.0,<1.0.0
+psycopg[binary,pool]>=3.2.10,<4.0.0
 uvicorn[standard]>=0.49.0,<1.0.0
 strands-agents>=1.45.0,<2.0.0
-strands-agents-tools>=0.8.2,<1.0.0
-strands-fun-tools[clipboard,chess,display,template,utility,dialog,ui]>=0.4.0,<1.0.0
+strands-agents-tools[a2a-client,agent-core-browser,agent-core-code-interpreter,diagram,elasticsearch-memory,local-chromium-browser,mem0-memory,mongodb-memory,rss,twelvelabs,use-computer]>=0.8.3,<1.0.0
+strands-fun-tools[all]>=0.4.0,<1.0.0
 strands-google>=0.1.0,<1.0.0
+perplexityai>=0.40.0,<1.0.0
 google-genai>=2.10.0,<3.0.0
 boto3>=1.34.0,<2.0.0
 # Nova Sonic bidi streaming (BidiNovaSonicModel) — the experimental smithy SDK
@@ -16,3 +18,4 @@ passlib[bcrypt]>=1.7.4,<2.0.0     # password hashing (bcrypt backend)
 bcrypt>=4.0.0,<4.1.0              # pin: passlib 1.7.4 is incompatible with bcrypt>=4.1 (72-byte / __about__ breakage)
 pyjwt>=2.8.0,<3.0.0               # WS short-lived token; sessions may use cookie+itsdangerous instead
 python-multipart>=0.0.9,<1.0.0   # multipart/form-data for CSV onboarding uploads
+ultralytics>=8.3.0,<9

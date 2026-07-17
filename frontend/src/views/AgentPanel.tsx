@@ -3,7 +3,9 @@ import {
   DownloadIcon,
   ExternalLinkIcon,
   FileIcon,
+  MousePointerClickIcon,
   RefreshCcwIcon,
+  RotateCcwIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Tool as AiTool } from "ai";
@@ -136,8 +138,72 @@ export const AgentPanel = ({ agent }: { agent: LiveAgent }) => {
     [agent.workspaceFiles]
   );
 
+  const liveBrowser = agent.browserSession;
+
   return (
-    <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-sidebar p-4">
+    <aside
+      className={`flex shrink-0 animate-in flex-col gap-4 overflow-y-auto border-l bg-sidebar p-4 duration-300 slide-in-from-right-4 transition-[width] ${
+        liveBrowser?.liveViewUrl
+          ? "w-[min(56rem,55vw)]"
+          : "w-96"
+      }`}
+    >
+      {liveBrowser?.liveViewUrl && (
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+                Live browser
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {agent.browserControlState === "human"
+                  ? "You have control"
+                  : "Agent has control"}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                aria-label="Refresh live browser view"
+                onClick={agent.refreshBrowserLiveView}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <RefreshCcwIcon className="size-3.5" />
+              </Button>
+              {agent.browserControlState === "human" ? (
+                <Button
+                  onClick={agent.releaseBrowserControl}
+                  size="sm"
+                  variant="secondary"
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                  Return to agent
+                </Button>
+              ) : (
+                <Button onClick={agent.takeBrowserControl} size="sm">
+                  <MousePointerClickIcon className="size-3.5" />
+                  Take control
+                </Button>
+              )}
+            </div>
+          </div>
+          <WebPreview
+            className="h-[32rem] min-h-96"
+            defaultUrl={liveBrowser.currentPageUrl}
+            key={liveBrowser.sessionName}
+          >
+            <WebPreviewNavigation>
+              <WebPreviewUrl
+                aria-label="Current browser page"
+                readOnly
+                value={liveBrowser.currentPageUrl || "about:blank"}
+              />
+            </WebPreviewNavigation>
+            <WebPreviewBody src={liveBrowser.liveViewUrl} />
+          </WebPreview>
+        </div>
+      )}
+
       {agent.agentCard && (
         <Agent className="w-full">
           <AgentHeader
