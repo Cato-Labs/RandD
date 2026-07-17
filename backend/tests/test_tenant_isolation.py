@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from tests.conftest import add_tenant, seed_user
+from .helpers import add_tenant, seed_user
 
 
 def _make_two_tenants(migrated_db: Path) -> str:

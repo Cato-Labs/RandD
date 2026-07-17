@@ -54,7 +54,6 @@ WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Vantage AI Backend")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://44-193-208-77.sslip.io", "http://localhost:5173"],
     allow_origins=[origin.strip() for origin in os.getenv("VANTAGE_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
@@ -558,7 +557,6 @@ async def websocket_endpoint(
     mode: str = Query("audio", pattern="^(audio|text)$"),
     voice: str = Query("Puck"),
     provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$"),
-    token: str = Query(...),
 ) -> None:
     """Drive one live session with the vendored bidi harness loop.
 
@@ -566,9 +564,8 @@ async def websocket_endpoint(
     supervises input/output tasks in the harness task group, executes tools
     concurrently, and tears everything down via ``stop_all``.
 
-    Authentication: a short-lived WS token (minted by ``/api/auth/ws-token``)
-    is required as a query param because browsers cannot set WS headers. It is
-    validated at accept() and its ``tenant_id`` is bound into the agent.
+    Authentication uses the short-lived, single-use organization token minted
+    by ``/api/auth/ws-token`` because browsers cannot set WebSocket headers.
     """
     if VANTAGE.token_service is None:
         await websocket.close(code=1013, reason="Vantage authentication is not configured")
@@ -581,17 +578,6 @@ async def websocket_endpoint(
         return
     session_id = str(claims["jti"])
     await websocket.accept()
-    # Validate the WS token before doing anything else; on failure reuse the
-    # existing bidi_error-to-browser + close pattern.
-    try:
-        claims = auth.verify_ws_token(token)
-        tenant_id = claims["tenant_id"]
-    except Exception:
-        await websocket.send_text(
-            json.dumps({"type": "bidi_error", "error": "unauthorized"})
-        )
-        await websocket.close()
-        return
     if not PROVIDERS.get(provider, {}).get("enabled", True):
         await websocket.send_text(
             json.dumps({"type": "bidi_error", "error": f"provider {provider!r} is disabled"})
@@ -601,11 +587,65 @@ async def websocket_endpoint(
     try:
         # Inside the try so construction failures (missing credentials, model
         # deps) reach the browser as bidi_error instead of a dead socket.
-        agent = create_agent(mode=mode, voice=voice, provider=provider, tenant_id=tenant_id)
-        await agent.run(
-            inputs=[BidiWebSocketInput(websocket)],
-            outputs=[BidiWebSocketOutput(websocket)],
-            invocation_state={"tenant_id": tenant_id},
+        def emit_approval(event: dict[str, Any]) -> None:
+            asyncio.create_task(websocket.send_text(json.dumps(event, default=str)))
+
+        loop = asyncio.get_running_loop()
+
+        def emit_browser(event: dict[str, Any]) -> None:
+            payload = json.dumps(event, default=str)
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(websocket.send_text(payload))
+            )
+
+        def associate_approval(request, resolution) -> dict[str, str]:
+            return VANTAGE.repository.associate_approved_evidence(
+                context.organization_id,
+                context.user_id,
+                inspection_id=request.inspection_id,
+                photo_id=request.media_id,
+                item_id=request.item_id,
+                result_id=request.result_id,
+                asset_id=request.asset_id,
+                verdict=request.proposed_verdict,
+            )
+
+        registry = ApprovalRegistry(
+            event_sink=emit_approval,
+            associate_approval=associate_approval,
+            conversation_sink=emit_approval,
+        )
+
+        async def resolve_approval(payload: dict[str, Any]) -> None:
+            try:
+                registry.resolve(
+                    session_id=session_id,
+                    resolution=ApprovalResolution(
+                        approval_id=str(payload.get("approvalId") or ""),
+                        decision=str(payload.get("decision") or ""),
+                        feedback=payload.get("feedback"),
+                        input_mode=payload.get("inputMode"),
+                    ),
+                )
+            except Exception as exc:
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "approval_error",
+                            "approvalId": payload.get("approvalId"),
+                            "error": str(exc),
+                        }
+                    )
+                )
+
+        browser = LiveViewAgentCoreBrowser(
+            region=(
+                os.getenv("AGENTCORE_BROWSER_REGION")
+                or os.getenv("AWS_REGION")
+                or os.getenv("AWS_DEFAULT_REGION")
+            ),
+            identifier=os.getenv("AGENTCORE_BROWSER_IDENTIFIER") or None,
+            event_sink=emit_browser,
         )
 
         async def resolve_browser_control(payload: dict[str, Any]) -> None:

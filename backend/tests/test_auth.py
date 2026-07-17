@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import add_tenant, seed_user
+from .helpers import seed_user
 
 
 def test_login_correct_and_wrong_password(client, migrated_db: Path) -> None:
