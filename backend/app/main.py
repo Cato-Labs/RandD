@@ -185,22 +185,6 @@ VOICES: dict[str, list[dict[str, str]]] = {
         {"id": "Orus", "name": "Orus", "gender": "male", "accent": "American", "age": "adult", "description": "Firm male voice."},
         {"id": "Zephyr", "name": "Zephyr", "gender": "female", "accent": "American", "age": "adult", "description": "Bright female voice."},
     ],
-    "openai": [
-        {"id": "alloy", "name": "Alloy", "gender": "neutral", "accent": "American", "age": "adult", "description": "Balanced neutral voice."},
-        {"id": "ash", "name": "Ash", "gender": "male", "accent": "American", "age": "adult", "description": "Warm male voice."},
-        {"id": "coral", "name": "Coral", "gender": "female", "accent": "American", "age": "adult", "description": "Bright female voice."},
-        {"id": "echo", "name": "Echo", "gender": "male", "accent": "American", "age": "adult", "description": "Resonant male voice."},
-        {"id": "sage", "name": "Sage", "gender": "female", "accent": "American", "age": "adult", "description": "Calm female voice."},
-        {"id": "shimmer", "name": "Shimmer", "gender": "female", "accent": "American", "age": "adult", "description": "Crisp female voice."},
-        {"id": "verse", "name": "Verse", "gender": "male", "accent": "American", "age": "adult", "description": "Expressive male voice."},
-        {"id": "marin", "name": "Marin", "gender": "female", "accent": "American", "age": "adult", "description": "Natural conversational voice."},
-        {"id": "cedar", "name": "Cedar", "gender": "male", "accent": "American", "age": "adult", "description": "Grounded male voice."},
-    ],
-    "nova": [
-        {"id": "matthew", "name": "Matthew", "gender": "male", "accent": "American", "age": "adult", "description": "Default American male voice."},
-        {"id": "tiffany", "name": "Tiffany", "gender": "female", "accent": "American", "age": "adult", "description": "American female voice."},
-        {"id": "amy", "name": "Amy", "gender": "female", "accent": "British", "age": "adult", "description": "British female voice."},
-    ],
 }
 
 
@@ -266,7 +250,7 @@ async def get_models() -> dict[str, Any]:
 
 
 @app.get("/api/voices")
-async def get_voices(provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$")) -> dict[str, Any]:
+async def get_voices(provider: str = Query(DEFAULT_PROVIDER, pattern="^gemini$")) -> dict[str, Any]:
     return {"voices": VOICES[provider]}
 
 
@@ -341,7 +325,7 @@ async def websocket_endpoint(
     token: str = Query(...),
     mode: str = Query("audio", pattern="^(audio|text)$"),
     voice: str = Query("Puck"),
-    provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$"),
+    provider: str = Query(DEFAULT_PROVIDER, pattern="^gemini$"),
 ) -> None:
     """Drive one live session with the published Strands BidiAgent loop.
 

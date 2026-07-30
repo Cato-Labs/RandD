@@ -38,16 +38,13 @@ DEFAULT_MODEL_ID = "gemini-3.1-flash-live-preview"
 DEFAULT_PROVIDER = os.getenv("STRQC_BIDI_PROVIDER", "gemini")
 
 # The inspector's input device is ALWAYS the browser microphone, which streams
-# PCM16 at this rate (frontend MIC_SAMPLE_RATE in use-live-agent.ts). Every bidi
+# PCM16 at this rate (frontend MIC_SAMPLE_RATE in use-live-agent.ts). The bidi
 # model must be told this is the input rate so it decodes the samples correctly.
-# Gemini/Nova already default to 16 kHz; OpenAI Realtime defaults to 24 kHz and
-# ignores the per-chunk sample_rate, so without this it misreads the mic (audio
-# sounds sped-up/garbled to the model) and comprehension/tool-use degrades.
 BROWSER_MIC_RATE = 16000
 
-# The three vended bidi providers (strands-py/src/strands/experimental/bidi/models).
-# Each entry drives the frontend model picker and the per-provider voice list.
-# "enabled" gates the picker and /ws.
+# Gemini Live is the only enabled bidi provider. The SDK also ships
+# nova_sonic/openai_realtime models; they are intentionally not registered here.
+# This dict drives the frontend model picker and the voice list.
 PROVIDERS: dict[str, dict[str, Any]] = {
     "gemini": {
         "name": "Gemini Live",
@@ -55,22 +52,6 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "model_id": os.getenv("GEMINI_LIVE_MODEL", DEFAULT_MODEL_ID),
         "default_voice": "Puck",
         "description": "Native multimodal realtime (gemini-3.1-flash-live-preview).",
-        "enabled": True,
-    },
-    "openai": {
-        "name": "GPT-Realtime-2",
-        "vendor": "OpenAI",
-        "model_id": os.getenv("OPENAI_MODEL", "gpt-realtime-2"),
-        "default_voice": "alloy",
-        "description": "OpenAI Realtime over WebSocket — default field agent model.",
-        "enabled": True,
-    },
-    "nova": {
-        "name": "Nova Sonic 2",
-        "vendor": "Amazon",
-        "model_id": os.getenv("STRQC_NOVA_MODEL_ID", "amazon.nova-2-sonic-v1:0"),
-        "default_voice": "matthew",
-        "description": "Amazon Bedrock bidirectional speech (us-east-1).",
         "enabled": True,
     },
 }
@@ -93,60 +74,33 @@ TOOLS = [
 
 
 def build_model(provider: str, mode: str, voice: str) -> Any:
-    """Build the vended bidi model for one provider (imported lazily per session)."""
+    """Build the bidi model for one provider (imported lazily per session)."""
     if provider not in PROVIDERS:
         raise ValueError(f"Unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
 
-    # input_rate matches the browser mic (16 kHz) for every provider; output_rate
-    # is left at each model's native rate — the frontend plays back at whatever
-    # sample_rate the model stamps on bidi_audio_stream (use-live-agent.ts).
+    # input_rate matches the browser mic (16 kHz); output_rate is left at the
+    # model's native rate — the frontend plays back at whatever sample_rate the
+    # model stamps on bidi_audio_stream (use-live-agent.ts).
     provider_config: dict[str, Any] = {"audio": {"voice": voice, "input_rate": BROWSER_MIC_RATE}}
 
-    if provider == "gemini":
-        from strands.experimental.bidi.models.gemini_live import BidiGeminiLiveModel
+    from strands.experimental.bidi.models.gemini_live import BidiGeminiLiveModel
 
-        # SDK-default config: AUDIO responses with input/output transcription.
-        # gemini-3.1-flash-live-preview rejects TEXT-only response modalities,
-        # so text-mode sessions ride the same audio session and read transcripts.
-        api_key = os.getenv("GOOGLE_API_KEY")
+    # SDK-default config: AUDIO responses with input/output transcription.
+    # gemini-3.1-flash-live-preview rejects TEXT-only response modalities,
+    # so text-mode sessions ride the same audio session and read transcripts.
+    api_key = os.getenv("GOOGLE_API_KEY")
 
-        thinking_level = os.getenv("GEMINI_THINKING_LEVEL") or os.getenv("STRQC_GEMINI_THINKING_LEVEL", "HIGH")
+    thinking_level = os.getenv("GEMINI_THINKING_LEVEL") or os.getenv("STRQC_GEMINI_THINKING_LEVEL", "HIGH")
 
-        inference_config = {}
-        if thinking_level:
-            inference_config["thinking_config"] = {"thinking_level": thinking_level}
-        provider_config["inference"] = inference_config
+    inference_config = {}
+    if thinking_level:
+        inference_config["thinking_config"] = {"thinking_level": thinking_level}
+    provider_config["inference"] = inference_config
 
-        return BidiGeminiLiveModel(
-            model_id=PROVIDERS["gemini"]["model_id"],
-            provider_config=provider_config,
-            client_config={"api_key": api_key} if api_key else None,
-        )
-
-    if provider == "openai":
-        from strands.experimental.bidi.models.openai_realtime import BidiOpenAIRealtimeModel
-
-        client_config: dict[str, Any] = {}
-        for key, env in (
-            ("api_key", "OPENAI_API_KEY"),
-            ("organization", "OPENAI_ORGANIZATION"),
-            ("project", "OPENAI_PROJECT"),
-        ):
-            if os.getenv(env):
-                client_config[key] = os.environ[env]
-        return BidiOpenAIRealtimeModel(
-            model_id=PROVIDERS["openai"]["model_id"],
-            provider_config=provider_config,
-            client_config=client_config or None,
-        )
-
-    # nova — credentials come from the standard AWS chain
-    from strands.experimental.bidi.models.nova_sonic import BidiNovaSonicModel
-
-    return BidiNovaSonicModel(
-        model_id=PROVIDERS["nova"]["model_id"],
+    return BidiGeminiLiveModel(
+        model_id=PROVIDERS["gemini"]["model_id"],
         provider_config=provider_config,
-        client_config={"region": os.getenv("AWS_REGION", "us-east-1")},
+        client_config={"api_key": api_key} if api_key else None,
     )
 
 

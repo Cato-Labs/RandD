@@ -143,7 +143,7 @@ export const useLiveAgent = () => {
     refreshAgentCard();
     refreshWorkspace();
     fetch("/api/models")
-      .then((res) => (res.ok ? res.json() : { default: "openai", models: [] }))
+      .then((res) => (res.ok ? res.json() : { default: "gemini", models: [] }))
       .then((data: { default: LiveModel["id"]; models: LiveModel[] }) => {
         setModels(data.models);
         setModelState(data.default);
