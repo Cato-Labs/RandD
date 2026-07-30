@@ -245,6 +245,11 @@ def test_forward_migration_contract_and_checksum_evidence() -> None:
 
 def test_checked_in_legacy_history_matches_frozen_id_catalog() -> None:
     database = Path(__file__).resolve().parents[2] / "str_qc.sqlite"
+    if not database.exists():
+        pytest.skip(
+            "str_qc.sqlite is a local-only fixture (gitignored); "
+            "restore it with: git show origin/main:str_qc.sqlite > str_qc.sqlite"
+        )
     evidence = audit(database)
     assert evidence == {
         "report_count": 51,

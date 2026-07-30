@@ -137,7 +137,11 @@ async def inspection_video(
         "audio_max_db": max_db,
         "audio_ok": max_db is not None and max_db > -50,
     }
-    browser_camera.deliver_clip(media_session_id, info)
+    # This upload arrives on its own HTTP request, outside the WebSocket's
+    # session scope, so bind the caller-supplied session explicitly to wake
+    # the take_video tool blocking on that session's clip mailbox.
+    with browser_camera.session_scope(media_session_id):
+        browser_camera.deliver_clip(info)
     return info
 
 
@@ -457,23 +461,27 @@ async def websocket_endpoint(
                 provider=provider,
                 session_tools=session_tools,
             )
-            await agent.run(
-                inputs=[BidiWebSocketInput(
-                    websocket,
-                    session_id=session_id,
-                    approval_resolver=resolve_approval,
-                )],
-                outputs=[BidiWebSocketOutput(websocket, session_id=session_id)],
-                invocation_state={
-                    "organization_id": context.organization_id,
-                    "user_id": context.user_id,
-                    "roles": sorted(context.roles),
-                    "home_grants": sorted(context.home_grants),
-                    "session_id": session_id,
-                    "repository": VANTAGE.repository,
-                    "approval_registry": registry,
-                },
-            )
+            # Bind the authenticated session for the duration of the run so
+            # camera tools, which the model invokes with only LLM-supplied
+            # arguments, resolve to this session's media and no other.
+            with browser_camera.session_scope(session_id):
+                await agent.run(
+                    inputs=[BidiWebSocketInput(
+                        websocket,
+                        session_id=session_id,
+                        approval_resolver=resolve_approval,
+                    )],
+                    outputs=[BidiWebSocketOutput(websocket, session_id=session_id)],
+                    invocation_state={
+                        "organization_id": context.organization_id,
+                        "user_id": context.user_id,
+                        "roles": sorted(context.roles),
+                        "home_grants": sorted(context.home_grants),
+                        "session_id": session_id,
+                        "repository": VANTAGE.repository,
+                        "approval_registry": registry,
+                    },
+                )
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -482,7 +490,10 @@ async def websocket_endpoint(
         except Exception:
             pass
     finally:
-        browser_camera.discard_session(session_id)
+        # Teardown runs after the session scope has exited, so re-bind to
+        # satisfy the registry's same-session ownership check.
+        with browser_camera.session_scope(session_id):
+            browser_camera.discard_session(session_id)
         if "browser" in locals():
             browser.close_platform()
 
