@@ -35,6 +35,19 @@ def create_auth_router(runtime: VantageRuntime) -> APIRouter:
 
     context = session_context(runtime)
 
+    @router.post("/access")
+    def access(response: Response) -> dict:
+        if runtime.token_service is None or not runtime.access_email:
+            raise HTTPException(status_code=503, detail="One-click access is not configured")
+        user, memberships = runtime.memberships(runtime.access_email.strip().lower())
+        if user is None or not memberships:
+            raise HTTPException(status_code=503, detail="Configured access identity is unavailable")
+        active_org = memberships[0]["organization_id"]
+        roles = [item["role"] for item in memberships if item["organization_id"] == active_org]
+        token = runtime.token_service.issue_session(str(user["id"]), str(active_org), roles, ttl=timedelta(hours=12))
+        response.set_cookie(COOKIE_NAME, token, httponly=True, secure=os.getenv("VANTAGE_ENV") == "production", samesite="lax", max_age=43200, path="/")
+        return _session(user, memberships, active_org)
+
     @router.post("/code/request")
     def request_code(payload: EmailBody) -> dict:
         if runtime.magic_codes is None:
@@ -69,7 +82,7 @@ def create_auth_router(runtime: VantageRuntime) -> APIRouter:
         return _session(user, memberships, active_org)
 
     @router.get("/me")
-    def me(ctx: Annotated[TenantContext, Depends(context)]) -> dict:
+    def me(ctx: TenantContext = Depends(context)) -> dict:
         with runtime.connect() as connection:
             connection.row_factory = __import__("sqlite3").Row
             user = dict(connection.execute("SELECT * FROM app_user WHERE id=?", (ctx.user_id,)).fetchone())
@@ -77,7 +90,7 @@ def create_auth_router(runtime: VantageRuntime) -> APIRouter:
         return _session(user, memberships, ctx.organization_id)
 
     @router.post("/active-organization")
-    def choose_organization(payload: OrganizationBody, response: Response, ctx: Annotated[TenantContext, Depends(context)]) -> dict:
+    def choose_organization(payload: OrganizationBody, response: Response, ctx: TenantContext = Depends(context)) -> dict:
         with runtime.connect() as connection:
             roles = [row[0] for row in connection.execute(
                 "SELECT role FROM organization_membership WHERE organization_id=? AND user_id=? AND active=1",

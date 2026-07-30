@@ -6,14 +6,15 @@ calls and starts/stops the browser camera (or captures a frame) accordingly.
 The confirmation string tells the model what to expect next.
 """
 
+from typing import Literal
+
 from strands import tool
 
 # rear/front are explicit facing picks; flip toggles whatever is current.
-_ACTIONS = ("start", "stop", "snap", "flip", "rear", "front")
-
-
 @tool
-def control_camera(action: str) -> str:
+def control_camera(
+    action: Literal["start", "stop", "snap", "flip", "rear", "front"],
+) -> str:
     """Control the inspector's device camera (the one in their browser).
 
     Use this yourself whenever you need to see — you do not need to ask the
@@ -44,10 +45,6 @@ def control_camera(action: str) -> str:
         str: What will happen next.
     """
     normalized = action.strip().lower()
-    if normalized not in _ACTIONS:
-        return (
-            f"Unknown action {action!r} — use start, stop, snap, flip, rear, or front."
-        )
     if normalized == "start":
         return (
             "Camera start requested (rear/outward-facing lens by default). Live "

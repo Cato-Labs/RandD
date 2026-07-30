@@ -424,6 +424,198 @@
         }
       }
     },
+    "/v1/agent/{id}/files": {
+      "get": {
+        "summary": "List Agent Response Files",
+        "description": "List the files a response produced in the sandbox and delivered with the `share_file` tool. Scoped to the authenticated account, which only ever sees its own files. File content is not returned inline; download it with the file content endpoint.",
+        "operationId": "listAgentFiles",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Response id (`resp_<...>`)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseFileList"
+                }
+              }
+            },
+            "description": "The list of files delivered from the response's sandbox."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "$ref": "#/components/schemas/ErrorInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Unknown id, or the response belongs to a different account."
+          }
+        }
+      }
+    },
+    "/v1/agent/{id}/files/{file_id}/content": {
+      "get": {
+        "summary": "Download Agent Response File",
+        "description": "Download the raw bytes of a file the response delivered with the `share_file` tool. The `file_id` comes from the file list endpoint and is distinct from the response `id`. The response streams raw bytes, not JSON, with a `Content-Type` matching the file and a `Content-Disposition: attachment` header carrying the original filename.",
+        "operationId": "downloadAgentFile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Response id (`resp_<...>`)"
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "File id from the file list endpoint"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "description": "The raw file bytes."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "$ref": "#/components/schemas/ErrorInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Unknown response id or file id, or the response belongs to a different account."
+          }
+        }
+      }
+    },
+    "/v1/agent/{id}/cancel": {
+      "post": {
+        "summary": "Cancel Agent Response",
+        "description": "Requests cancellation of response `{id}`. Acts on durable state, so it works for background runs that outlive the client connection. Cancellation is asynchronous: a `200` acknowledges the request (`status: cancelling`) and the run stops shortly after - poll `GET /v1/agent/{id}` for its terminal status. Cancelling a run that is already terminal returns `400`. Ownership is enforced server side; a cross-tenant or unknown id surfaces as `404`.",
+        "operationId": "cancelAgentResponse",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Response id (`resp_<...>`)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "response_id",
+                    "status"
+                  ],
+                  "properties": {
+                    "response_id": {
+                      "type": "string",
+                      "description": "The response id (`resp_<...>`)."
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "cancelling"
+                      ],
+                      "description": "Always `cancelling` - the cancel was accepted and the run stops asynchronously. An already-terminal run returns `400` instead, so no terminal status appears here."
+                    }
+                  }
+                }
+              }
+            },
+            "description": "The cancel request was accepted; the run is being cancelled."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "$ref": "#/components/schemas/ErrorInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "The response is already terminal, or the request is invalid."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "$ref": "#/components/schemas/ErrorInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Unknown id, or the response belongs to a different account."
+          }
+        }
+      }
+    },
     "/v1/models": {
       "get": {
         "summary": "List Models",
@@ -460,6 +652,24 @@
                       "owned_by": "anthropic"
                     },
                     {
+                      "id": "openai/gpt-5.6-sol",
+                      "object": "model",
+                      "created": 0,
+                      "owned_by": "openai"
+                    },
+                    {
+                      "id": "openai/gpt-5.6-terra",
+                      "object": "model",
+                      "created": 0,
+                      "owned_by": "openai"
+                    },
+                    {
+                      "id": "openai/gpt-5.6-luna",
+                      "object": "model",
+                      "created": 0,
+                      "owned_by": "openai"
+                    },
+                    {
                       "id": "openai/gpt-5.5",
                       "object": "model",
                       "created": 0,
@@ -467,12 +677,6 @@
                     },
                     {
                       "id": "google/gemini-3.1-flash-lite",
-                      "object": "model",
-                      "created": 0,
-                      "owned_by": "google"
-                    },
-                    {
-                      "id": "google/gemini-3.1-flash-lite-preview",
                       "object": "model",
                       "created": 0,
                       "owned_by": "google"
@@ -738,8 +942,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 128000,
-                "exclusiveMinimum": 0
+                "maximum": 128000.0,
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -794,8 +998,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "minimum": 0,
-                "maximum": 2
+                "minimum": 0.0,
+                "maximum": 2.0
               },
               {
                 "type": "null"
@@ -808,8 +1012,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "minimum": 0,
-                "maximum": 1
+                "minimum": 0.0,
+                "maximum": 1.0
               },
               {
                 "type": "null"
@@ -2601,6 +2805,10 @@
           "input": {
             "$ref": "#/components/schemas/Input"
           },
+          "background": {
+            "description": "Run the response asynchronously. With `stream: false`, the request returns immediately with `status: \"queued\"`; poll `GET /v1/responses/{id}` until the response reaches a terminal status. Background runs are durable, so you can also stream them and reconnect after a drop.",
+            "type": "boolean"
+          },
           "instructions": {
             "description": "System instructions for the model",
             "type": "string"
@@ -2616,9 +2824,9 @@
             "type": "integer"
           },
           "max_steps": {
-            "description": "Maximum number of research loop steps.\nIf provided, overrides the preset's max_steps value.\nMust be >= 1 if specified. Maximum allowed is 10.\n",
+            "description": "Maximum number of research loop steps.\nIf provided, overrides the preset's max_steps value.\nMust be >= 1 if specified. Maximum allowed is 100.\n",
             "format": "int32",
-            "maximum": 10,
+            "maximum": 100,
             "minimum": 1,
             "type": "integer"
           },
@@ -2663,6 +2871,26 @@
               "$ref": "#/components/schemas/Tool"
             },
             "type": "array"
+          },
+          "skills": {
+            "type": "array",
+            "description": "Built-in and request-scoped inline skills available to the model. Skill metadata is disclosed to the model up front; full instructions are loaded on demand through the load_skill tool. Selecting any skill enables the sandbox tool for the request. Requests with skills run on the durable backend and skills are not echoed back on Response objects.",
+            "maxItems": 16,
+            "items": { "$ref": "#/components/schemas/Skill" }
+          },
+          "temperature": {
+            "description": "OpenAI-compatible sampling temperature forwarded to generation.",
+            "format": "double",
+            "maximum": 2,
+            "minimum": 0,
+            "type": "number"
+          },
+          "top_p": {
+            "description": "OpenAI-compatible nucleus sampling parameter forwarded to generation.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
           }
         },
         "required": [
@@ -2670,6 +2898,62 @@
         ],
         "type": "object",
         "title": "ResponsesRequest"
+      },
+      "ResponseFile": {
+        "type": "object",
+        "description": "One file shared from a response's sandbox via `share_file`.",
+        "required": [
+          "id",
+          "object",
+          "filename",
+          "bytes",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "File identifier, used to download the file; distinct from the response id."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `file`."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Name the sandbox gave the file."
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "File size in bytes."
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix timestamp when the file was created."
+          }
+        },
+        "title": "ResponseFile"
+      },
+      "ResponseFileList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "description": "Always `list`."
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResponseFile"
+            }
+          }
+        },
+        "title": "ResponseFileList"
       },
       "ResponsesResponse": {
         "description": "Non-streaming response returned when stream is false",
@@ -3364,8 +3648,10 @@
         "enum": [
           "completed",
           "failed",
+          "incomplete",
           "in_progress",
-          "requires_action"
+          "queued",
+          "cancelled"
         ],
         "type": "string",
         "title": "Status"
@@ -3397,6 +3683,7 @@
           "effort": {
             "description": "How much effort the model should spend on reasoning",
             "enum": [
+              "minimal",
               "low",
               "medium",
               "high",
@@ -3638,12 +3925,84 @@
         ],
         "title": "Tool"
       },
+      "Skill": {
+        "title": "Skill",
+        "oneOf": [
+          { "$ref": "#/components/schemas/BuiltinSkill" },
+          { "$ref": "#/components/schemas/InlineSkill" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "builtin": "#/components/schemas/BuiltinSkill",
+            "inline": "#/components/schemas/InlineSkill"
+          }
+        }
+      },
+      "BuiltinSkill": {
+        "title": "BuiltinSkill",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "name"],
+        "properties": {
+          "type": { "type": "string", "enum": ["builtin"] },
+          "name": {
+            "type": "string",
+            "enum": ["office", "office/docx", "office/pdf", "office/pptx", "office/xlsx"],
+            "description": "Built-in skill to make available to the model. office is the full Office bundle (enables all four leaves). office/docx, office/pdf, office/pptx, office/xlsx each create polished documents of that type from scratch, with structural validation and visual QA."
+          }
+        }
+      },
+      "InlineSkill": {
+        "title": "InlineSkill",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "name", "description", "instructions"],
+        "properties": {
+          "type": { "type": "string", "enum": ["inline"] },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Request-scoped lowercase ASCII name separated by single hyphens."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Short discovery description, limited to 1,024 UTF-8 bytes."
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536,
+            "description": "Instructions returned by load_skill, limited to 65,536 UTF-8 bytes per skill and 262,144 bytes across the request."
+          }
+        }
+      },
       "WebSearchTool": {
         "description": "Web search tool configuration for the Responses API",
         "properties": {
           "filters": {
             "$ref": "#/components/schemas/WebSearchFilters",
             "description": "Domain and date filters for search results"
+          },
+          "search_context_size": {
+            "description": "Named search context budget. Explicit max_tokens / max_tokens_per_page budgets override it.",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "max_results": {
+            "description": "Upper bound on the number of search results collected per call. Must be between 1 and 50; values outside that range are rejected with a 400 error.",
+            "format": "int32",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
           },
           "max_tokens": {
             "description": "Maximum total tokens for search context",

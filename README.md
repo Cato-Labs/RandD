@@ -5,14 +5,14 @@
 > API contract: [Vantage v1 API and event contract](docs/product/VANTAGE_API_CONTRACT.md)
 > Runtime setup: [Vantage v1 runtime configuration](docs/development/VANTAGE_V1_RUNTIME.md)
 
-An AI-native quality-control platform for short-term rental operations — a strands-based field agent powered by **Gemini Live** (`gemini-3.1-flash-live-preview`) that guides photo-verified turnovers, opens work orders, and delivers signed-off readiness reports.
+An AI-native quality-control platform for short-term rental operations — a Strands-based field agent powered by **Gemini Live** that guides photo-verified turnovers, opens work orders, and delivers signed-off readiness reports.
 
 ## AI Chat (Gemini Live) — AI Elements frontend + Strands bidi backend
 
-Live text + voice chat UI built entirely from [Vercel AI Elements](https://github.com/vercel/ai-elements)
-components, driven by the repo-vendored Strands bidi agent (`strands-py/`) running
-**gemini-3.1-flash-live-preview** with exactly three tools: `editor`, `shell`, `load_tool`
-(meta-tooling: the agent creates new tools with the editor and hot-loads them with `load_tool`).
+Live text + voice chat UI built from [Vercel AI Elements](https://github.com/vercel/ai-elements)
+components and the published Strands `BidiAgent` running
+**gemini-3.1-flash-live-preview**. Native, project, memory, and MCP tools are
+registered directly before each connection and run inside the SDK-owned loop.
 See `DESIGN.md` for the full component plan and architecture.
 
 ### Run
@@ -40,9 +40,8 @@ npm run dev   # http://localhost:5173
 2. Voice: click **Mic** and speak — persona animates, transcripts stream, model audio plays and is
    replayable per turn via the AudioPlayer.
 3. Text: type in the prompt input (attach images by drag-drop/paste); responses stream as markdown.
-4. Meta-tooling: say/type *"create a tool that reverses text, then use it on 'hello'"* — watch
-   Chain of Thought, Tool, Sandbox (shell), the Agent panel tool list, and the workspace
-   artifacts/web-preview update from live events. Toggle **Workflow** for the live session graph.
+4. Tooling: request a registered tool and inspect its native Tool card, generated
+   arguments, result, and final response in the same uninterrupted session.
 5. Frontend build check: `cd frontend && npm run build`. Backend import check:
    `cd backend && GOOGLE_API_KEY=dummy .venv/bin/python -c "from app.main import app"`.
 
@@ -65,12 +64,11 @@ Phase 1 STR QC kickoff artifacts:
 
 | Path | Package | What |
 | --- | --- | --- |
-| `apps/agent` | `strqc-agent` | The field agent (Strands BIDI + Gemini Live, tools, persona) |
 | `apps/api` | `strqc-api` | HTTP API + realtime voice bridge (FastAPI) |
 | `apps/web` | — | Next.js mobile-first PWA (shadcn/ui + AI Elements) |
 | `packages/shared` | `strqc-shared` | Config (pydantic-settings) + secret envelope encryption |
 | `packages/db` | `strqc-db` | Versioned SQL migrations, repositories, dev seeds |
-| `harness-sdk/` | — | Vendored Strands SDK monorepo (editable install; git-ignored) |
+| `backend/` | — | FastAPI runtime using pinned published Strands packages |
 | `Escapia/` | — | Escapia HSAPI OpenAPI specs (integration contract) |
 | `sql/`, `scripts/`, `docs/` | — | Phase-1 artifacts (baseline schema, CSV migration, architecture) |
 
@@ -80,7 +78,7 @@ Requires Python 3.12+, Node 20+, pnpm.
 
 ```bash
 cp .env.example .env            # fill in keys (see comments in the file)
-make install                    # Python packages (editable) + Strands SDK
+make install                    # pinned published Strands + editable project packages
 make install-web                # Next.js dependencies
 make migrate                    # apply DB migrations  (DB_PATH=./str_qc.sqlite)
 make seed                       # load Big Bear dev fixtures
@@ -92,7 +90,6 @@ Run the stack (separate shells):
 ```bash
 make api                        # FastAPI on :8000
 make web                        # Next.js dev server on :3000
-make agent                      # agent console harness (text mode)
 ```
 
 `make help` lists all targets.

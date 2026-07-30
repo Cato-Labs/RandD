@@ -6,7 +6,6 @@ import enum
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
 from app.evidence_storage import _safe
 
@@ -40,7 +39,3 @@ class ReportArtifactStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(html, encoding="utf-8")
         return ReportArtifact(report_id, path)
-
-
-class DeliveryAdapter(Protocol):
-    async def deliver(self, artifact: ReportArtifact, destination: str) -> str: ...

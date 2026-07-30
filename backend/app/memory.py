@@ -7,9 +7,8 @@ Knowledge Base ``knowledge-base-quick-start-fu4ig`` (ID ``LAJ1DYSVHG``) and reac
 Bedrock through the standard AWS credential chain (populate ``backend/.env`` — see
 ``.env.example``; credentials are never hardcoded or committed).
 
-The vendored ``BidiAgent`` has no ``memory_manager`` plugin slot (that belongs to the
-standard ``Agent``), so we register the manager's own ``search_memory`` /
-``add_memory`` tools (``MemoryManager.tools``) on the bidi agent's tool registry.
+The manager's own ``search_memory`` / ``add_memory`` objects from
+``MemoryManager.tools`` are registered directly on the Bidi agent.
 
 Writability follows the framework rules: with only a knowledge base ID the store is
 read-only. Set ``BEDROCK_KB_DATA_SOURCE_ID`` (plus ``BEDROCK_KB_S3_BUCKET`` for the
@@ -82,8 +81,3 @@ def get_memory_manager() -> MemoryManager:
         add_tool_config=store.writable,
         injection=False,
     )
-
-
-def memory_tools() -> list[Any]:
-    """The framework's ``search_memory`` / ``add_memory`` AgentTools for the bidi agent."""
-    return list(get_memory_manager().tools)

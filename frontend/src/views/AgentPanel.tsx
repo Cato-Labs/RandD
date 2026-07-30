@@ -13,7 +13,6 @@ import {
   Agent,
   AgentContent,
   AgentHeader,
-  AgentInstructions,
   AgentTool,
   AgentTools,
 } from "@/components/ai-elements/agent";
@@ -211,9 +210,6 @@ export const AgentPanel = ({ agent }: { agent: LiveAgent }) => {
             name={agent.agentCard.name}
           />
           <AgentContent>
-            <AgentInstructions>
-              {agent.agentCard.instructions}
-            </AgentInstructions>
             <AgentTools collapsible type="single">
               {agent.agentCard.tools.map((tool) => (
                 <AgentTool

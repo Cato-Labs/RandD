@@ -180,20 +180,20 @@ const buildDetections = (
         return null;
       }
 
-      const sourceLeft = clampUnit(Math.min(detection.x1, detection.x2));
-      const sourceRight = clampUnit(Math.max(detection.x1, detection.x2));
-      const top = clampUnit(Math.min(detection.y1, detection.y2));
-      const bottom = clampUnit(Math.max(detection.y1, detection.y2));
+      const sourceLeft = Math.min(detection.x1, detection.x2);
+      const sourceRight = Math.max(detection.x1, detection.x2);
+      const top = Math.min(detection.y1, detection.y2);
+      const bottom = Math.max(detection.y1, detection.y2);
       if (sourceRight <= sourceLeft || bottom <= top) {
         return null;
       }
 
-      const normalizedLeft = facing === "user" ? 1 - sourceRight : sourceLeft;
-      const normalizedRight = facing === "user" ? 1 - sourceLeft : sourceRight;
-      const left = normalizedLeft * frame.width * scale + offsetX;
-      const right = normalizedRight * frame.width * scale + offsetX;
-      const displayTop = top * frame.height * scale + offsetY;
-      const displayBottom = bottom * frame.height * scale + offsetY;
+      const displaySourceLeft = facing === "user" ? frame.width - sourceRight : sourceLeft;
+      const displaySourceRight = facing === "user" ? frame.width - sourceLeft : sourceRight;
+      const left = displaySourceLeft * scale + offsetX;
+      const right = displaySourceRight * scale + offsetX;
+      const displayTop = top * scale + offsetY;
+      const displayBottom = bottom * scale + offsetY;
       if (
         right <= 0 ||
         left >= viewport.width ||
@@ -205,10 +205,10 @@ const buildDetections = (
 
       const baseKey = spatialKey(
         detection,
-        normalizedLeft,
-        top,
-        normalizedRight,
-        bottom
+        displaySourceLeft / frame.width,
+        top / frame.height,
+        displaySourceRight / frame.width,
+        bottom / frame.height
       );
       const occurrence = keyCounts.get(baseKey) ?? 0;
       keyCounts.set(baseKey, occurrence + 1);

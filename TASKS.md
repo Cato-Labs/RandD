@@ -26,9 +26,9 @@
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Gemini Live BIDI model provider | ✅ | [gemini_live.py](harness-sdk/strands-py/src/strands/experimental/bidi/models/gemini_live.py) — audio I/O, transcription, **image input**, tool calls/results, usage, session resumption, interruption, `go_away` handling; default `gemini-3.1-flash-live-preview` |
-| BIDI agent runtime + IO | ✅ | [agent.py](harness-sdk/strands-py/src/strands/experimental/bidi/agent/agent.py), `BidiAudioIO` / `BidiTextIO`; concurrent tool executor, hooks, session manager |
-| Phase-1 relational schema | ✅ | [schema.sql](harness-sdk/schema.sql) — properties, spaces-as-features, stakeholders/roles, tasks + stages, checklist templates, inspections, photos, work orders, reports, maintenance |
+| Gemini Live BIDI model provider | ✅ | Published `strands-agents==1.48.0`; configured in `backend/app/agent.py` with image, audio, transcription, tool, usage, and interruption events. |
+| BIDI agent runtime + IO | ✅ | One published `BidiAgent.run` connection with transport adapters in `backend/app/io.py`. |
+| Phase-1 relational schema | ✅ | Project migrations and repository models under `packages/db` and `backend/app/vantage`. |
 | CSV migration (Master + roster) | ✅ | `scripts/migrate_phase1.py` (in git history; regenerate to working tree) — stage/feature parsing, issue log, secret redaction |
 | Google OAuth helper | 🟡 | [gmail_auth.py](gmail_auth.py) — headless OAuth for `strands-google`; auth only, no tool wiring yet |
 | Escapia API contracts | ✅ (reference) | [Escapia/](Escapia/) — OpenAPI3 + Swagger2 + consolidated HTML |
@@ -46,8 +46,8 @@
 
 Establish the monorepo shape so agent, services, and app can grow without churn.
 
-- [ ] **M0.1** Define workspace layout — `apps/agent` (Python), `apps/api` (Python service), `apps/web` (Next.js), `packages/db` (schema + migrations), `packages/shared` (types/contracts). **[M]**
-- [ ] **M0.2** Pin the Strands SDK: consume `harness-sdk/strands-py` via editable/vendored dependency; stop relying on the loose `strands-py/` copy. Document the pin. **[S]**
+- [ ] **M0.1** Define workspace layout — `apps/api` (Python service), `apps/web` (Next.js), `packages/db` (schema + migrations), `packages/shared` (types/contracts). **[M]**
+- [x] **M0.2** Pin published Strands releases and remove the vendored SDK copy. **[S]**
 - [ ] 🔒 **M0.3** Secrets hygiene: confirm `.env`, `coral-pipe-*.json`, `gmail_credentials.json`, `gmail_token.json` are git-ignored; add `.env.example`; move real secrets to a secret manager for deploy; **rotate any key that was ever committed**. **[S]**
 - [ ] **M0.4** `README` quickstart for each app + a single `make dev` / task runner. **[S]**
 - [ ] **M0.5** Baseline CI (lint, type-check, unit tests) for Python and web. **[M]**

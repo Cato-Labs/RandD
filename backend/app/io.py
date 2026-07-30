@@ -1,22 +1,22 @@
-"""WebSocket IO channels for the vendored bidi agent harness.
+"""WebSocket transport adapters for the published Strands BidiAgent.
 
-Implements the vendored ``BidiInput``/``BidiOutput`` protocols
-(strands-py ``strands.experimental.bidi.types.io``) so a browser WebSocket
-plugs straight into ``BidiAgent.run()`` — the harness's own loop drives
+Implements the documented ``BidiInput``/``BidiOutput`` protocols so a browser
+WebSocket plugs straight into ``BidiAgent.run()`` — the SDK's loop drives
 input reading, event fan-out, task-group supervision, and ``stop_all``
 cleanup. We do not hand-roll a bridge around ``send``/``receive``.
 """
 
 import asyncio
 import base64
+from io import BytesIO
 import json
+from pathlib import Path
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any
 
 from fastapi import WebSocket
 
-from app import _vendor  # noqa: F401  (vendored bidi must shadow pip copy)
 from app import browser_camera
 from strands.experimental.bidi.types.events import (
     BidiAudioInputEvent,
@@ -42,16 +42,18 @@ def _sanitize(value: Any) -> Any:
 
 
 class BidiWebSocketInput:
-    """BidiInput protocol: reads browser frames, yields vendored TypedEvents."""
+    """BidiInput protocol: reads browser frames and yields native typed events."""
 
     def __init__(
         self,
         websocket: WebSocket,
         *,
+        session_id: str,
         approval_resolver: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         browser_control_resolver: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self._websocket = websocket
+        self._session_id = session_id
         self._approval_resolver = approval_resolver
         self._browser_control_resolver = browser_control_resolver
 
@@ -90,9 +92,7 @@ class BidiWebSocketInput:
                     header, encoded = encoded.split(",", 1)
                     if ";base64" in header:
                         mime_type = header[5:].split(";", 1)[0] or mime_type
-                from app.browser_camera import add_frame
-
-                add_frame(encoded)
+                browser_camera.add_frame(self._session_id, encoded)
                 return BidiImageInputEvent(image=encoded, mime_type=mime_type)
             if event_type == "bidi_text_input":
                 return BidiTextInputEvent(**data)
@@ -101,10 +101,8 @@ class BidiWebSocketInput:
             if event_type == "bidi_image_input":
                 # Tee the frame so capture tools (take_photo/take_video) can
                 # grab the device camera's view server-side.
-                from app.browser_camera import add_frame
-
                 if isinstance(data.get("image"), str):
-                    add_frame(data["image"])
+                    browser_camera.add_frame(self._session_id, data["image"])
                 return BidiImageInputEvent(**data)
 
 
@@ -116,11 +114,15 @@ class BidiWebSocketOutput:
     the exact contract the frontend's useLiveAgent hook consumes.
     """
 
-    def __init__(self, websocket: WebSocket) -> None:
+    def __init__(self, websocket: WebSocket, *, session_id: str) -> None:
         self._websocket = websocket
+        self._session_id = session_id
         self._tool_uses: dict[str, dict[str, Any]] = {}
         self._send_lock = asyncio.Lock()
         self._detection_task: asyncio.Task[None] | None = None
+        self._detection_offsets: dict[Path, int] = {
+            (Path.cwd() / ".yolo_detections" / "detections.jsonl").resolve(): 0
+        }
 
     async def start(self, agent: Any) -> None:  # noqa: ANN401 (protocol signature)
         self._detection_task = asyncio.create_task(self._forward_yolo_detections())
@@ -138,17 +140,57 @@ class BidiWebSocketOutput:
             await self._websocket.send_text(json.dumps(payload, default=str))
 
     async def _forward_yolo_detections(self) -> None:
-        sequence = 0
         while True:
-            event = await asyncio.to_thread(
-                browser_camera.wait_for_detections,
-                sequence,
-                0.5,
-            )
-            if event is None:
-                continue
-            sequence, payload = event
-            await self._send(payload)
+            await asyncio.sleep(0.25)
+            for path, offset in list(self._detection_offsets.items()):
+                entries, next_offset = await asyncio.to_thread(
+                    self._read_detection_entries, path, offset
+                )
+                self._detection_offsets[path] = next_offset
+                for entry in entries:
+                    dimensions = self._live_frame_dimensions()
+                    if dimensions is None:
+                        continue
+                    width, height = dimensions
+                    await self._send({
+                        "type": "yolo_detections",
+                        "width": width,
+                        "height": height,
+                        "timestamp": entry.get("timestamp"),
+                        "detections": entry.get("objects", []),
+                    })
+
+    @staticmethod
+    def _read_detection_entries(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
+        if not path.exists():
+            return [], 0
+        size = path.stat().st_size
+        if size < offset:
+            offset = 0
+        entries: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as handle:
+            handle.seek(offset)
+            for line in handle:
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    entries.append(value)
+            return entries, handle.tell()
+
+    @staticmethod
+    def _live_frame_dimensions() -> tuple[int, int] | None:
+        try:
+            from PIL import Image
+
+            frame = browser_camera.latest_frame(self._session_id)
+            if frame is None:
+                return None
+            with Image.open(BytesIO(frame.jpeg)) as image:
+                return int(image.width), int(image.height)
+        except Exception:
+            return None
 
     async def __call__(self, event: BidiOutputEvent) -> None:
         outgoing = _sanitize(dict(event))
@@ -160,6 +202,16 @@ class BidiWebSocketOutput:
                     "name": current.get("name"),
                     "input": current.get("input", {}),
                 }
+                if current.get("name") == "yolo_vision":
+                    tool_input = current.get("input", {})
+                    if isinstance(tool_input, dict):
+                        save_dir = tool_input.get("save_dir", ".yolo_detections")
+                        detection_path = Path(str(save_dir)).expanduser()
+                        if not detection_path.is_absolute():
+                            detection_path = Path.cwd() / detection_path
+                        self._detection_offsets.setdefault(
+                            (detection_path / "detections.jsonl").resolve(), 0
+                        )
 
         if outgoing.get("type") == "tool_result":
             result = outgoing.get("tool_result") or {}

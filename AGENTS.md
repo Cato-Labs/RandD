@@ -1,16 +1,17 @@
 # Agentic Short-Term Rental Quality Control Platform
 
-> ## 🔒 NONNEGOTIABLE — Do not change the agent tool configuration
+> ## 🔒 NONNEGOTIABLE — Native Strands tool configuration
 >
-> **Nobody — human or agent — changes the agent's tool configuration unless the user explicitly asks for that specific change.** Do not "clean it up," remove "unused" imports, reorder, wrap, or add tools you think are missing. If you believe a change is warranted, stop and ask first.
+> **Nobody changes the agent's tool configuration unless the user explicitly asks for that specific change.**
 >
-> The configuration is deliberate and is defined by:
-> - **`backend/app/agent.py` → `TOOLS`**: the baseline registry is **exactly six core meta-tooling tools** — `editor, shell, load_tool, mcp_client, http_request, environment` — and nothing else.
-> - **`backend/app/agent.py` imports**: **all tool imports are intentionally preserved** even though only the six are registered, so every tool module stays importable and its file path resolvable for `load_tool`. **Do not remove or trim them.**
-> - **`backend/app/main.py`**: the per-connection session-tool injection (native `browser`, `perplexity_agent`, inventory/onboarding, tenant Slack, Smarty MCP, long-term memory) — do not change what is injected.
-> - **`backend/app/prompts.py`**: the meta-tooling system prompt — do not rewrite or overwrite it.
+> The production configuration is defined by `backend/app/agent.py` and
+> `backend/app/main.py`: direct native tools, direct project `@tool` functions,
+> memory-manager tools, and discovered MCP `ProxyTool` objects are registered
+> before one native `BidiAgent.run` connection starts.
 >
-> **Design intent:** the agent is a *meta-tooling agent*. Only the six core primitives are registered up front to keep the model's tool declarations small (context window); every other tool is hot-loaded on demand at runtime via the native `load_tool` tool (from its Python file path), and remote tools via `mcp_client`. Session-scoped tools that cannot be loaded from a file stay injected per connection. See `CLAUDE.md` for the full rule.
+> Do not vendor or copy the Bidi loop, dynamically redeclare tools, wrap native
+> tools, handwrite native schemas/tool-use IDs, patch site-packages, or add fake,
+> fallback, or simulated implementations.
 
 ## Executive Summary
 
@@ -571,7 +572,7 @@ There is no pre-built Escapia tool in the Strands ecosystem (unlike the native S
 - **[DESIGN.md](DESIGN.md)** — the frontend design system & interaction contract (brand/art direction, tokens, components, the signature voice console, accessibility, and the Next.js stack).
 
 **Current state (as assessed):**
-- ✅ **Gemini Live BIDI integration is implemented in the Strands SDK** — `BidiGeminiLiveModel` defaults to **`gemini-3.1-flash-live-preview`** with audio I/O, transcription, native image input, tool calls/results, usage, session resumption, and interruption handling. This is the "reasoning-capable LLM with cameras/tools" core from §7.
+- ✅ **Gemini Live BIDI integration is implemented in the Strands SDK** — production uses **`gemini-3.1-flash-live-preview`** with audio I/O, transcription, native image input, tool calls/results, usage, session resumption, and interruption handling.
 - ✅ **Phase-1 relational schema + CSV migration** exist (properties, stakeholders/roles, tasks + stages, checklist templates, inspections, photos, work orders, reports, maintenance).
 - ⬜ **Not yet built:** the STR application agent assembly (system prompt/persona, tool orchestration), the domain tools (camera, journal, memory, Google, email, **Slack `files_upload_v2`**, telephony), the **Escapia** client/tool, report assembly + delivery, the backend API + realtime voice bridge, and the **entire Next.js frontend**.
 - 🔧 **Schema extensions required before v1:** Addendum-1 fields (`Report.delivery_channel`/`delivered_at`/`delivery_status`, `Photo.include_in_report`) and Addendum-2 fields (Escapia native IDs, `SyncCursor`, `HousekeepingStatusMap`) are **not yet present** in the live schema. Tracked in TASKS.md `M1`.

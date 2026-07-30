@@ -40,3 +40,9 @@ backend/workspace/
 
 # Playwright CLI logs
 .playwright-cli/
+
+# Agent scratch / generated artifacts
+.tmp/
+output/
+fable5_cot_parsed/
+.kilo/agents/

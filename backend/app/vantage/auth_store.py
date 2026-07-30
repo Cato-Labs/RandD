@@ -52,7 +52,10 @@ class SqlReplayStore:
     def consume(self, jti: str, expires_at: int) -> bool:
         try:
             with self.connect() as c:
-                c.execute("INSERT INTO revoked_token(jti,kind,expires_at) VALUES (?,?,?)", (jti, "ws", expires_at))
+                c.execute(
+                    "INSERT INTO revoked_token(jti,kind,expires_at) VALUES (?,?,?)",
+                    (jti, "ws", datetime.fromtimestamp(expires_at, timezone.utc)),
+                )
             return True
         except Exception as exc:
             if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():

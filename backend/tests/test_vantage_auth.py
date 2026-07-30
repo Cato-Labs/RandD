@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import sqlite3
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.vantage.auth import AuthError, MagicCodeService, TokenService
+from app.vantage.auth_api import create_auth_router
 from app.vantage.auth_store import SqlChallengeStore, SqlReplayStore
+from app.vantage.runtime import VantageRuntime
 from app.vantage.schema import install_sqlite_schema
 
 
@@ -16,6 +21,60 @@ class CapturingSender:
     def send_code(self, email: str, code: str) -> str:
         self.messages.append((email, code))
         return "provider-message-id"
+
+
+def _access_client(tmp_path, *, access_email: str | None, enrolled: bool = True) -> tuple[TestClient, TokenService]:
+    database = tmp_path / "access.sqlite"
+    connection = sqlite3.connect(database)
+    install_sqlite_schema(connection)
+    if enrolled:
+        connection.execute("INSERT INTO organization(id,name) VALUES (?,?)", ("org-a", "Big Bear"))
+        connection.execute("INSERT INTO app_user(id,email) VALUES (?,?)", ("user-a", "operator@example.com"))
+        connection.execute(
+            "INSERT INTO organization_membership(organization_id,user_id,role) VALUES (?,?,?)",
+            ("org-a", "user-a", "INSPECTOR"),
+        )
+        connection.commit()
+    connection.close()
+
+    tokens = TokenService(b"production-grade-test-secret")
+    runtime = VantageRuntime(
+        repository=None,
+        token_service=tokens,
+        magic_codes=None,
+        authorization=None,
+        calendar=None,
+        places=None,
+        navigation=None,
+        media_service=None,
+        connect=lambda: sqlite3.connect(database),
+        access_email=access_email,
+    )
+    app = FastAPI()
+    app.include_router(create_auth_router(runtime))
+    return TestClient(app), tokens
+
+
+def test_one_click_access_issues_existing_scoped_session(tmp_path) -> None:
+    client, tokens = _access_client(tmp_path, access_email=" OPERATOR@example.com ")
+
+    response = client.post("/api/auth/access")
+
+    assert response.status_code == 200
+    claims = tokens.verify_session(response.cookies["vantage_session"])
+    assert (claims["sub"], claims["org_id"], claims["roles"]) == ("user-a", "org-a", ["INSPECTOR"])
+
+
+@pytest.mark.parametrize("access_email,enrolled", [(None, True), ("missing@example.com", False)])
+def test_one_click_access_fails_closed_without_configured_active_identity(
+    tmp_path, access_email: str | None, enrolled: bool
+) -> None:
+    client, _ = _access_client(tmp_path, access_email=access_email, enrolled=enrolled)
+
+    response = client.post("/api/auth/access")
+
+    assert response.status_code == 503
+    assert "vantage_session" not in response.cookies
 
 
 def test_magic_code_is_hashed_single_use_and_attempt_limited() -> None:

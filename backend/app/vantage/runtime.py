@@ -164,6 +164,7 @@ class VantageRuntime:
     media_service: OriginalMediaService | None
     connect: Any
     database: PostgresAdapter | None = None
+    access_email: str | None = None
 
     def open(self) -> None:
         if self.database is not None:
@@ -200,15 +201,26 @@ class VantageRuntime:
         return self.context_from_claims(claims)
 
     def context_from_claims(self, claims: dict[str, Any]) -> TenantContext:
-        with self.connect() as connection:
-            roles = [row[0] for row in connection.execute(
-                "SELECT role FROM organization_membership WHERE organization_id=? AND user_id=? AND active=1",
-                (claims["org_id"], claims["sub"]),
-            )]
-            grants = [row[0] for row in connection.execute(
-                "SELECT home_id FROM home_grant WHERE organization_id=? AND user_id=?",
-                (claims["org_id"], claims["sub"]),
-            )]
+        if self.database is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is unavailable")
+        provisional = TenantContext(
+            str(claims["sub"]),
+            str(claims["org_id"]),
+            frozenset(str(role) for role in claims.get("roles", ())),
+            frozenset(),
+        )
+        with self.database.pool.connection(timeout=self.database.config.checkout_timeout_seconds) as connection:
+            with connection.transaction():
+                connection.execute("SET TRANSACTION READ ONLY")
+                self.database.context_setter.apply(connection, provisional)
+                roles = [str(row["role"]) for row in connection.execute(
+                    "SELECT role FROM organization_membership WHERE organization_id=%s AND user_id=%s AND active=true",
+                    (claims["org_id"], claims["sub"]),
+                )]
+                grants = [str(row["home_id"]) for row in connection.execute(
+                    "SELECT home_id FROM home_grant WHERE organization_id=%s AND user_id=%s",
+                    (claims["org_id"], claims["sub"]),
+                )]
         if not roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organization access is not active")
         return TenantContext(str(claims["sub"]), str(claims["org_id"]), frozenset(roles), frozenset(grants))
@@ -232,7 +244,7 @@ def build_runtime() -> VantageRuntime:
         repository, token_service, magic_codes, authorization,
         GoogleCalendarService(calendar_client, authorization),
         GooglePlacesService(places_client), GoogleNavigationService(routes_client, authorization),
-        media_service, connect, database,
+        media_service, connect, database, os.getenv("VANTAGE_ACCESS_EMAIL"),
     )
 
 

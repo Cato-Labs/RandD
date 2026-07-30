@@ -1,0 +1,4 @@
+[submodule "tools/MCP_SERVERS/mcp-captcha-solver"]
+	path = tools/MCP_SERVERS/mcp-captcha-solver
+	url = https://github.com/2captcha/mcp-captcha-solver.git
+	branch = main

@@ -10,8 +10,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from mcp.client.streamable_http import streamablehttp_client
-from strands.tools.mcp import MCPClient
 
 DEFAULT_SMARTY_MCP_URL = "https://mcp.api.smarty.com/"
 
@@ -46,29 +44,3 @@ def load_smarty_mcp_settings() -> SmartyMCPSettings:
         auth_token=auth_token,
     )
 
-
-def smarty_perplexity_mcp_tool(allowed_tools: list[str] | None = None) -> dict:
-    """Build Perplexity's native remote-MCP tool entry for Smarty."""
-    settings = load_smarty_mcp_settings()
-    definition: dict = {
-        "type": "mcp",
-        "server_label": "smarty",
-        "server_url": settings.url,
-        "headers": settings.headers,
-    }
-    if allowed_tools:
-        definition["allowed_tools"] = list(allowed_tools)
-    return definition
-
-
-def create_smarty_mcp_client() -> MCPClient:
-    """Create a native Strands MCP client for direct agent tool registration.
-
-    Use the returned client as a context manager, call ``list_tools_sync()``,
-    and pass those discovered tools directly to ``Agent(tools=...)``.
-    """
-    settings = load_smarty_mcp_settings()
-    return MCPClient(
-        lambda: streamablehttp_client(settings.url, headers=settings.headers),
-        prefix="smarty",
-    )

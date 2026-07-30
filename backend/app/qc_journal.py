@@ -11,10 +11,9 @@ holds ONE narrative note and up to three photos: one "before", one "after",
 and "evidence" (default).
 """
 
-from strands import tool
+from typing import Literal
 
-_VALID_RESULTS = ("PASS", "FAIL", "NA")
-_VALID_TAGS = ("before", "after", "evidence")
+from strands import tool
 
 # Exact labels from the live form. Keys are sections (with subsections flattened
 # as "HouseKeeping / <group>"). Labels must be passed verbatim to the tools.
@@ -96,10 +95,10 @@ def list_checklist_items() -> str:
 @tool
 def record_checklist_result(
     item: str,
-    result: str,
+    result: Literal["PASS", "FAIL", "NA"],
     note: str = "",
     attach_photo: bool = False,
-    photo_tag: str = "evidence",
+    photo_tag: Literal["before", "after", "evidence"] = "evidence",
 ) -> str:
     """Record one turnover-inspection checklist item on the live QC form.
 
@@ -121,15 +120,9 @@ def record_checklist_result(
     """
     label = _closest_label(item)
     if label is None:
-        return (
-            f"Unknown item {item!r} — call list_checklist_items and use an exact label."
-        )
+        raise ValueError(f"unknown checklist item: {item!r}")
     result_upper = result.strip().upper()
-    if result_upper not in _VALID_RESULTS:
-        return f"Invalid result {result!r} — use PASS, FAIL, or NA."
     tag = photo_tag.strip().lower()
-    if tag not in _VALID_TAGS:
-        tag = "evidence"
     parts = [f"Recorded {label!r}: {result_upper}"]
     if note:
         parts.append(f"note saved: {note}")
@@ -161,7 +154,11 @@ def record_section_note(section: str, note: str) -> str:
 
 
 @tool
-def attach_item_photo(item: str, photo_tag: str = "evidence", note: str = "") -> str:
+def attach_item_photo(
+    item: str,
+    photo_tag: Literal["before", "after", "evidence"] = "evidence",
+    note: str = "",
+) -> str:
     """Pin the photo you just took onto a specific form line item.
 
     Sends the most recent device-camera frame (the last streamed frame or
@@ -179,12 +176,8 @@ def attach_item_photo(item: str, photo_tag: str = "evidence", note: str = "") ->
     """
     label = _closest_label(item)
     if label is None:
-        return (
-            f"Unknown item {item!r} — call list_checklist_items and use an exact label."
-        )
+        raise ValueError(f"unknown checklist item: {item!r}")
     tag = photo_tag.strip().lower()
-    if tag not in _VALID_TAGS:
-        tag = "evidence"
     parts = [f"Latest camera frame pinned to {label!r} as {tag}"]
     if note:
         parts.append(f"note saved: {note}")

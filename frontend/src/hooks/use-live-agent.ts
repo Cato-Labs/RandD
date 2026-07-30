@@ -57,9 +57,9 @@ type SubmitPayload = {
   files: { url: string; mediaType: string; filename?: string }[];
 };
 
-const wsUrl = (mode: SessionMode, voice: string, provider: string) => {
+const wsUrl = (mode: SessionMode, voice: string, provider: string, token: string) => {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/ws?mode=${mode}&voice=${encodeURIComponent(voice)}&provider=${encodeURIComponent(provider)}`;
+  return `${proto}://${window.location.host}/ws?token=${encodeURIComponent(token)}&mode=${mode}&voice=${encodeURIComponent(voice)}&provider=${encodeURIComponent(provider)}`;
 };
 
 export const useLiveAgent = () => {
@@ -95,6 +95,7 @@ export const useLiveAgent = () => {
   const micRef = useRef<MicCapture | null>(null);
   const cameraRef = useRef<CameraCapture | null>(null);
   const lastFrameRef = useRef<string | null>(null);
+  const mediaSessionIdRef = useRef<string>("");
   const cameraControlRef = useRef<{
     start: () => Promise<void>;
     stop: () => void;
@@ -108,6 +109,7 @@ export const useLiveAgent = () => {
   const audioChunksRef = useRef<Uint8Array[]>([]);
   const audioRateRef = useRef(24000);
   const sessionStartRef = useRef(0);
+  const connectionAttemptRef = useRef(0);
   const chatStatusRef = useRef<ChatStatus>("ready");
   const queueRef = useRef<QueueEntry[]>([]);
   const micActiveRef = useRef(false);
@@ -390,7 +392,15 @@ export const useLiveAgent = () => {
               appendText(role, text);
             }
           }
-          if (role === "assistant") setChatStatus("streaming");
+          if (role === "assistant") {
+            if (event.is_final === true) {
+              finalizeAssistantTurn();
+              setChatStatus("ready");
+              drainQueue();
+            } else {
+              setChatStatus("streaming");
+            }
+          }
           break;
         }
         case "bidi_grounding_metadata": {
@@ -448,25 +458,44 @@ export const useLiveAgent = () => {
           audioChunksRef.current = [];
           break;
         }
+        case "media_session": {
+          mediaSessionIdRef.current = String(event.sessionId ?? "");
+          break;
+        }
         case "yolo_detections": {
           const width = Number(event.width);
           const height = Number(event.height);
-          const timestamp = Number(event.timestamp);
+          const parsedTimestamp = Date.parse(String(event.timestamp ?? ""));
+          const timestamp = Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now();
           const detections = Array.isArray(event.detections)
-            ? event.detections.filter((value): value is YoloDetection => {
-                if (!value || typeof value !== "object") return false;
-                const detection = value as Partial<YoloDetection>;
-                return (
-                  typeof detection.label === "string" &&
-                  [
-                    detection.x1,
-                    detection.y1,
-                    detection.x2,
-                    detection.y2,
-                    detection.confidence,
-                    detection.classId,
-                  ].every((item) => typeof item === "number" && Number.isFinite(item))
-                );
+            ? event.detections.flatMap((value, index): YoloDetection[] => {
+                if (!value || typeof value !== "object") return [];
+                const detection = value as {
+                  object?: unknown;
+                  confidence?: unknown;
+                  bbox?: unknown;
+                };
+                if (
+                  typeof detection.object !== "string" ||
+                  typeof detection.confidence !== "number" ||
+                  !Array.isArray(detection.bbox) ||
+                  detection.bbox.length !== 4 ||
+                  !detection.bbox.every(
+                    (coordinate) =>
+                      typeof coordinate === "number" && Number.isFinite(coordinate)
+                  )
+                ) {
+                  return [];
+                }
+                return [{
+                  x1: detection.bbox[0] as number,
+                  y1: detection.bbox[1] as number,
+                  x2: detection.bbox[2] as number,
+                  y2: detection.bbox[3] as number,
+                  confidence: detection.confidence,
+                  classId: index,
+                  label: detection.object,
+                }];
               })
             : [];
           setYoloDetectionFrame(
@@ -474,25 +503,6 @@ export const useLiveAgent = () => {
               ? { width, height, timestamp, detections }
               : null
           );
-          break;
-        }
-        case "bidi_tools_updated": {
-          const names = Array.isArray(event.tools)
-            ? event.tools.filter((name): name is string => typeof name === "string")
-            : [];
-          setAgentCard((current) => {
-            if (!current) return current;
-            const descriptions = new Map(
-              current.tools.map((entry) => [entry.name, entry.description])
-            );
-            return {
-              ...current,
-              tools: names.map((name) => ({
-                name,
-                description: descriptions.get(name) ?? "Loaded for this live session.",
-              })),
-            };
-          });
           break;
         }
         case "tool_use_stream": {
@@ -564,7 +574,6 @@ export const useLiveAgent = () => {
             errorText: result.status === "error" ? output : undefined,
           });
           refreshWorkspace();
-          if (name === "load_tool") refreshAgentCard();
           break;
         }
         case "bidi_response_complete": {
@@ -619,6 +628,7 @@ export const useLiveAgent = () => {
   );
 
   const disconnect = useCallback(async () => {
+    connectionAttemptRef.current += 1;
     micRef.current?.stop();
     micRef.current = null;
     setMicActive(false);
@@ -639,12 +649,24 @@ export const useLiveAgent = () => {
 
   const connect = useCallback(async () => {
     await disconnect();
+    const attempt = ++connectionAttemptRef.current;
     setError(null);
     setStatus("connecting");
     playerRef.current = new PcmPlayer(setSpeaking);
-    const socket = new WebSocket(wsUrl(mode, voice, model));
+    const tokenResponse = await fetch("/api/auth/ws-token", { method: "POST" });
+    if (!tokenResponse.ok) {
+      if (attempt !== connectionAttemptRef.current) return;
+      setError("Authentication is required before connecting to the live agent.");
+      setStatus("disconnected");
+      setChatStatus("error");
+      return;
+    }
+    const { token } = (await tokenResponse.json()) as { token: string };
+    if (attempt !== connectionAttemptRef.current) return;
+    const socket = new WebSocket(wsUrl(mode, voice, model, token));
     socketRef.current = socket;
     socket.onmessage = (message) => {
+      if (socketRef.current !== socket) return;
       try {
         handleEvent(JSON.parse(message.data as string) as ServerEvent);
       } catch {
@@ -652,46 +674,38 @@ export const useLiveAgent = () => {
       }
     };
     socket.onclose = () => {
+      if (socketRef.current !== socket) return;
       setStatus("disconnected");
       setMicActive(false);
       setYoloDetectionFrame(null);
     };
     socket.onerror = () => {
+      if (socketRef.current !== socket) return;
       setError("WebSocket connection failed — is the backend running?");
       setStatus("disconnected");
       setChatStatus("error");
     };
   }, [disconnect, handleEvent, mode, voice, model]);
 
-  const [pendingReconnect, setPendingReconnect] = useState(false);
-
-  /** Switch vended provider. If a session is live, reconnects seamlessly. */
+  /** Switch vended provider. The connect effect opens one new native session. */
   const setModel = useCallback(
     (next: LiveModel["id"]) => {
       if (next === model) return;
       setModelState(next);
       const defaultVoice = models.find((entry) => entry.id === next)?.defaultVoice;
       if (defaultVoice) setVoiceState(defaultVoice);
-      if (socketRef.current) setPendingReconnect(true);
     },
     [model, models]
   );
 
-  /** Pick a voice for the current provider. If a session is live, reconnects with it. */
+  /** Pick a voice for the current provider. The connect effect opens one new native session. */
   const setVoice = useCallback(
     (next: string) => {
       if (next === voice) return;
       setVoiceState(next);
-      if (socketRef.current) setPendingReconnect(true);
     },
     [voice]
   );
-
-  useEffect(() => {
-    if (!pendingReconnect) return;
-    setPendingReconnect(false);
-    void connect();
-  }, [pendingReconnect, connect]);
 
   const startMic = useCallback(
     async (deviceId?: string) => {
@@ -841,7 +855,7 @@ export const useLiveAgent = () => {
       // Reuse the live session mic track — a second getUserMedia while
       // MicCapture holds the mic records silence on iOS Safari/some Androids.
       const blob = await camera.record(clamped * 1000, micRef.current?.mediaStream);
-      const query = `section=${encodeURIComponent(section)}&duration=${clamped}`;
+      const query = `section=${encodeURIComponent(section)}&duration=${clamped}&media_session_id=${encodeURIComponent(mediaSessionIdRef.current)}`;
       await fetch(`/api/inspection/video?${query}`, {
         method: "POST",
         headers: { "Content-Type": blob.type || "video/webm" },

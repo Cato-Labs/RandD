@@ -9,7 +9,7 @@ import {
   VideoIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import {
   CameraSelector,
   CameraSelectorContent,
@@ -34,10 +34,6 @@ import {
   ModelSelectorTrigger,
   ModelSelectorVendor,
 } from "@/components/ai-elements/model-selector";
-import {
-  Transcription,
-  TranscriptionSegment,
-} from "@/components/ai-elements/transcription";
 import {
   VoiceSelector,
   VoiceSelectorAccent,
@@ -245,7 +241,6 @@ export const VoiceDock = ({
   open?: boolean;
   onClose?: () => void;
 }) => {
-  const [transcriptTime, setTranscriptTime] = useState(0);
 
   const body = (
     <>
@@ -356,39 +351,6 @@ export const VoiceDock = ({
 
       <CameraControls agent={agent} />
 
-      <div className="min-h-0 flex-1">
-        <p className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          Live transcript
-        </p>
-        {agent.segments.length === 0 ? (
-          <p className="text-muted-foreground text-xs">
-            Transcript segments appear here as you and the agent speak.
-          </p>
-        ) : (
-          <Transcription
-            currentTime={transcriptTime}
-            onSeek={setTranscriptTime}
-            segments={agent.segments.map((segment) => ({
-              text: segment.text,
-              startSecond: segment.startSecond,
-              endSecond: segment.endSecond,
-            }))}
-          >
-            {(segment, index) => (
-              <TranscriptionSegment
-                className={
-                  agent.segments[index]?.role === "user"
-                    ? "font-medium"
-                    : undefined
-                }
-                index={index}
-                key={index}
-                segment={segment}
-              />
-            )}
-          </Transcription>
-        )}
-      </div>
     </>
   );
 

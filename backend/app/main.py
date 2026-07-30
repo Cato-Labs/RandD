@@ -1,37 +1,40 @@
 import asyncio
 import json
 import os
+import sys
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
+os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
+os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
+
 import uvicorn
+from mcp import StdioServerParameters
+from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamablehttp_client
 from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from strands.tools.registry import ToolRegistry
+from strands.tools.mcp import MCPClient
 
 from app.agent import DEFAULT_MODEL_ID, DEFAULT_PROVIDER, PROVIDERS, TOOLS, create_agent
-from app.agentcore_browser import LiveViewAgentCoreBrowser
+from strands_tools.browser import AgentCoreBrowser
 from app import browser_camera
-from app.inventory_tools import build_inventory_tools
+from app.inventory_tools import INVENTORY_TOOLS
 from app.io import BidiWebSocketInput, BidiWebSocketOutput
-from app.memory import memory_tools
+from app.memory import get_memory_manager
 from app.prompts import SYSTEM_PROMPT
-from app.perplexity_agent import perplexity_agent
-from app.smarty_mcp import SmartyMCPConfigurationError, create_smarty_mcp_client
+from app.smarty_mcp import SmartyMCPConfigurationError, load_smarty_mcp_settings
 from app.transcribe import compress_clip, measure_loudness, transcribe_audio
 from app.approval_registry import ApprovalRegistry, ApprovalResolution
-from app.approval_tools import approval_scope
 from app.vantage.api import create_vantage_router
 from app.vantage.auth_api import create_auth_router, session_context
 from app.vantage.google_day_api import create_google_day_router
 from app.vantage.runtime import build_runtime
-
-os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
-os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
 
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent / "workspace"
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,6 +94,7 @@ async def inspection_video(
     request: Request,
     section: str = Query(default=""),
     duration: float = Query(default=0.0),
+    media_session_id: str = Query(...),
 ) -> dict[str, Any]:
     """Receive a browser-recorded walkthrough clip (webm with mic audio).
 
@@ -133,7 +137,7 @@ async def inspection_video(
         "audio_max_db": max_db,
         "audio_ok": max_db is not None and max_db > -50,
     }
-    browser_camera.deliver_clip(info)
+    browser_camera.deliver_clip(media_session_id, info)
     return info
 
 
@@ -202,8 +206,14 @@ VOICES: dict[str, list[dict[str, str]]] = {
 
 @app.on_event("startup")
 async def startup() -> None:
+    VANTAGE.open()
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     os.chdir(WORKSPACE_DIR)
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    VANTAGE.close()
 
 
 _tool_list_cache: list[dict[str, str]] | None = None
@@ -214,7 +224,7 @@ def tool_list() -> list[dict[str, str]]:
     global _tool_list_cache
     if _tool_list_cache is None:
         registry = ToolRegistry()
-        registry.process_tools(TOOLS)
+        registry.process_tools(TOOLS + list(get_memory_manager().tools))
         tools = []
         for spec in registry.get_all_tool_specs():
             description = str(spec.get("description", ""))
@@ -333,11 +343,12 @@ async def websocket_endpoint(
     voice: str = Query("Puck"),
     provider: str = Query(DEFAULT_PROVIDER, pattern="^(gemini|openai|nova)$"),
 ) -> None:
-    """Drive one live session with the vendored bidi harness loop.
+    """Drive one live session with the published Strands BidiAgent loop.
 
     ``BidiAgent.run`` owns the whole lifecycle: it starts the agent loop,
     supervises input/output tasks in the harness task group, executes tools
-    concurrently, and tears everything down via ``stop_all``.
+    concurrently, and tears everything down via ``stop_all``. This endpoint
+    does not reproduce or supervise that loop.
 
     Authentication uses the short-lived, single-use organization token minted
     by ``/api/auth/ws-token`` because browsers cannot set WebSocket headers.
@@ -353,6 +364,7 @@ async def websocket_endpoint(
         return
     session_id = str(claims["jti"])
     await websocket.accept()
+    await websocket.send_text(json.dumps({"type": "media_session", "sessionId": session_id}))
     if not PROVIDERS.get(provider, {}).get("enabled", True):
         await websocket.send_text(
             json.dumps({"type": "bidi_error", "error": f"provider {provider!r} is disabled"})
@@ -364,14 +376,6 @@ async def websocket_endpoint(
         # deps) reach the browser as bidi_error instead of a dead socket.
         def emit_approval(event: dict[str, Any]) -> None:
             asyncio.create_task(websocket.send_text(json.dumps(event, default=str)))
-
-        loop = asyncio.get_running_loop()
-
-        def emit_browser(event: dict[str, Any]) -> None:
-            payload = json.dumps(event, default=str)
-            loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(websocket.send_text(payload))
-            )
 
         def associate_approval(request, resolution) -> dict[str, str]:
             return VANTAGE.repository.associate_approved_evidence(
@@ -413,27 +417,46 @@ async def websocket_endpoint(
                     )
                 )
 
-        browser = LiveViewAgentCoreBrowser(
+        browser = AgentCoreBrowser(
             region=(
                 os.getenv("AGENTCORE_BROWSER_REGION")
                 or os.getenv("AWS_REGION")
                 or os.getenv("AWS_DEFAULT_REGION")
             ),
             identifier=os.getenv("AGENTCORE_BROWSER_IDENTIFIER") or None,
-            event_sink=emit_browser,
         )
-
-        async def resolve_browser_control(payload: dict[str, Any]) -> None:
-            await run_in_threadpool(browser.handle_control, payload)
 
         session_tools = [
             browser.browser,
-            perplexity_agent,
-            *build_inventory_tools(VANTAGE.repository, context),
+            *INVENTORY_TOOLS,
         ]
         with ExitStack() as stack:
             try:
-                smarty = stack.enter_context(create_smarty_mcp_client())
+                perplexity = stack.enter_context(MCPClient(
+                    lambda: stdio_client(StdioServerParameters(
+                        command=sys.executable,
+                        args=["-m", "app.perplexity_mcp_server"],
+                        cwd=str(Path(__file__).resolve().parent.parent),
+                    )),
+                    prefix="perplexity",
+                ))
+                session_tools.extend(perplexity.list_tools_sync())
+            except Exception:
+                await websocket.send_text(json.dumps({
+                    "type": "integration_warning",
+                    "integration": "perplexity",
+                    "message": "Perplexity Agent API MCP server is unavailable",
+                }))
+
+            try:
+                smarty_settings = load_smarty_mcp_settings()
+                smarty = stack.enter_context(MCPClient(
+                    lambda: streamablehttp_client(
+                        smarty_settings.url,
+                        headers=smarty_settings.headers,
+                    ),
+                    prefix="smarty",
+                ))
                 session_tools.extend(smarty.list_tools_sync())
             except SmartyMCPConfigurationError:
                 pass
@@ -450,15 +473,23 @@ async def websocket_endpoint(
                 provider=provider,
                 session_tools=session_tools,
             )
-            with browser_camera.session_scope(session_id), approval_scope(session_id, registry):
-                await agent.run(
-                    inputs=[BidiWebSocketInput(
-                        websocket,
-                        approval_resolver=resolve_approval,
-                        browser_control_resolver=resolve_browser_control,
-                    )],
-                    outputs=[BidiWebSocketOutput(websocket)],
-                )
+            await agent.run(
+                inputs=[BidiWebSocketInput(
+                    websocket,
+                    session_id=session_id,
+                    approval_resolver=resolve_approval,
+                )],
+                outputs=[BidiWebSocketOutput(websocket, session_id=session_id)],
+                invocation_state={
+                    "organization_id": context.organization_id,
+                    "user_id": context.user_id,
+                    "roles": sorted(context.roles),
+                    "home_grants": sorted(context.home_grants),
+                    "session_id": session_id,
+                    "repository": VANTAGE.repository,
+                    "approval_registry": registry,
+                },
+            )
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -469,7 +500,7 @@ async def websocket_endpoint(
     finally:
         browser_camera.discard_session(session_id)
         if "browser" in locals():
-            browser.close_all()
+            browser.close_platform()
 
 
 if __name__ == "__main__":

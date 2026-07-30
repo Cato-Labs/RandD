@@ -164,7 +164,7 @@ There is no Strands `ToolSpec`, no wrapper around `strands-agents-tools` `http_r
 
 `TASKS.md` M4.2 explicitly requires: "Custom Strands tool wrapping `http_request`, using the OpenAPI3 spec as the endpoint/schema contract." This is the only piece in M4 that has to be built from scratch (per Addendum 2).
 
-**Recommendation:** Implement a Strands tool in `apps/agent/src/strqc_agent/tools/escapia.py` (or similar) that exposes high-level operations (e.g., `sync_reservations`, `push_housekeeping_ready`, `push_work_order`) backed by the existing `EscapiaClient`. The OpenAPI3 spec can be loaded at tool-registration time to validate endpoint names and parameter shapes, but the actual transport should still use the tested `httpx` client rather than a generic `http_request` tool with no auth/header logic.
+**Recommendation:** Implement the Escapia operation as a direct Strands tool in the production backend, backed by the existing `EscapiaClient`. The OpenAPI3 spec can be loaded at tool-registration time to validate endpoint names and parameter shapes, but the actual transport should still use the tested `httpx` client rather than a generic `http_request` tool with no auth/header logic.
 
 ---
 

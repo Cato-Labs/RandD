@@ -208,29 +208,28 @@ def save_site_memory(property_name: str, note: str) -> Dict[str, Any]:
     Returns:
         Dict with status and content (S3 URI of the stored note).
     """
-    try:
-        bucket = _bucket()
-        if not bucket:
-            return {"status": "error",
-                    "content": [{"text": "❌ BEDROCK_KB_S3_BUCKET is not configured."}]}
-        slug = _slug(property_name)
-        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-        key = f"{_house_prefixes(slug)['notes']}/{stamp}-note.txt"
-        body = (f"SITE MEMORY — {property_name}\n"
-                f"Recorded: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n\n{note}")
-        s3 = _s3()
-        _ensure_house_folders(s3, bucket, slug)
-        s3.put_object(Bucket=bucket, Key=key, Body=body.encode("utf-8"),
-                      ContentType="text/plain; charset=utf-8")
-        _start_ingestion()
-        return {"status": "success",
-                "content": [{"text": f"🧠 Site memory saved for {property_name}: s3://{bucket}/{key}"}]}
-    except Exception as exc:
-        return {"status": "error", "content": [{"text": f"❌ Save failed: {exc}"}]}
+    bucket = _bucket()
+    if not bucket:
+        raise RuntimeError("BEDROCK_KB_S3_BUCKET is not configured")
+    slug = _slug(property_name)
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    key = f"{_house_prefixes(slug)['notes']}/{stamp}-note.txt"
+    body = (f"SITE MEMORY — {property_name}\n"
+            f"Recorded: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n\n{note}")
+    s3 = _s3()
+    _ensure_house_folders(s3, bucket, slug)
+    s3.put_object(Bucket=bucket, Key=key, Body=body.encode("utf-8"),
+                  ContentType="text/plain; charset=utf-8")
+    ingestion_job_id = _start_ingestion()
+    return {
+        "property_name": property_name,
+        "uri": f"s3://{bucket}/{key}",
+        "ingestion_job_id": ingestion_job_id,
+    }
 
 
 @tool
-def archive_inspection_report(note: str = None) -> Dict[str, Any]:
+def archive_inspection_report(note: str | None = None) -> Dict[str, Any]:
     """Archive the latest inspection form into the knowledge-base S3 bucket.
 
     Uploads a plain-text digest under the Bedrock KB data-source prefix (so it
@@ -246,28 +245,11 @@ def archive_inspection_report(note: str = None) -> Dict[str, Any]:
     Returns:
         Dict with status and content (S3 URIs, ingestion job id)
     """
-    try:
-        if not LATEST_REPORT.exists():
-            return {
-                "status": "error",
-                "content": [{"text": "❌ No exported inspection form found yet — the form "
-                                     "exports itself as it changes; make an edit first."}],
-            }
-        result = archive_report(LATEST_REPORT.read_text(encoding="utf-8"), note=note)
-        ingest = (f" Ingestion job `{result['ingestion_job_id']}` started."
-                  if result.get("ingestion_job_id") else
-                  " KB will pick it up on its next sync.")
-        return {
-            "status": "success",
-            "content": [{
-                "text": f"📦 Archived inspection report to the knowledge base bucket.\n"
-                        f"- Searchable summary: `{result['summary_uri']}`\n"
-                        f"- Full interactive report: `{result['artifact_uri']}`\n"
-                        f"- Signed off: {result['signed_off']}.{ingest}"
-            }],
-        }
-    except Exception as e:
-        return {"status": "error", "content": [{"text": f"❌ Archive failed: {e}"}]}
+    if not LATEST_REPORT.exists():
+        raise FileNotFoundError(
+            "No exported inspection report exists; make a real inspection edit first"
+        )
+    return archive_report(LATEST_REPORT.read_text(encoding="utf-8"), note=note)
 
 
 if __name__ == "__main__":
