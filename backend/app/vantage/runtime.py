@@ -178,15 +178,39 @@ class VantageRuntime:
         return self.database.health() if self.database is not None else {"ready": False, "pool": {}}
 
     def memberships(self, email: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        """Resolve a sign-in identity before any tenant context exists.
+
+        Reads through the DAH-126 SECURITY DEFINER helpers rather than the
+        tables directly. Login has to answer "which organizations is this
+        address in?" before it can know an organization, so a direct SELECT
+        is filtered to zero rows by the tenant RLS policies, which require
+        app_org_id() to already be set.
+        """
         with self.connect() as connection:
-            connection.row_factory = sqlite3.Row
-            user = connection.execute("SELECT * FROM app_user WHERE lower(email)=lower(?) AND active=1", (email,)).fetchone()
-            if user is None:
+            if isinstance(connection, sqlite3.Connection):
+                # SQLite fixtures carry no RLS, so read the tables directly.
+                connection.row_factory = sqlite3.Row
+                user = connection.execute(
+                    "SELECT * FROM app_user WHERE lower(email)=lower(?) AND active=1", (email,)
+                ).fetchone()
+                if user is None:
+                    return None, []
+                memberships = connection.execute(
+                    """SELECT om.organization_id,o.name,om.role FROM organization_membership om
+                         JOIN organization o ON o.id=om.organization_id
+                        WHERE om.user_id=? AND om.active=1 ORDER BY o.name""",
+                    (user["id"],),
+                ).fetchall()
+                return dict(user), [dict(row) for row in memberships]
+
+            user = connection.execute(
+                "SELECT id,email,active FROM auth_user_by_email(?)", (email,)
+            ).fetchone()
+            if user is None or not user["active"]:
                 return None, []
             memberships = connection.execute(
-                """SELECT om.organization_id,o.name,om.role FROM organization_membership om
-                     JOIN organization o ON o.id=om.organization_id
-                    WHERE om.user_id=? AND om.active=1 ORDER BY o.name""",
+                """SELECT organization_id, organization_name AS name, role
+                     FROM auth_active_memberships(?) ORDER BY organization_name""",
                 (user["id"],),
             ).fetchall()
         return dict(user), [dict(row) for row in memberships]
