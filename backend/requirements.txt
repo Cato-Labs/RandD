@@ -1,7 +1,7 @@
 fastapi>=0.139.0,<1.0.0
 psycopg[binary,pool]>=3.2.10,<4.0.0
 uvicorn[standard]>=0.49.0,<1.0.0
-strands-agents==1.48.0
+strands-agents==1.50.2
 strands-agents-tools[a2a-client,agent-core-browser,agent-core-code-interpreter,diagram,elasticsearch-memory,local-chromium-browser,mem0-memory,mongodb-memory,rss,twelvelabs,use-computer]==0.8.4
 strands-fun-tools[all]==0.4.0
 strands-google==0.1.0

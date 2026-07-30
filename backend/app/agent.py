@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from app import _vendor  # noqa: F401  (must run before strands.experimental.bidi imports)
 from strands.experimental.bidi.agent import BidiAgent
 from strands_tools import batch, editor, environment, http_request, image_reader, load_tool, mcp_client, shell
 from strands_tools.graph import graph
@@ -31,7 +30,7 @@ from app.qc_journal import (
 from app.tool_libraries import list_library_tools
 from app.vision_tools import yolo_vision
 
-# Default matches the vendored strands-py BidiGeminiLiveModel (this repo's agent).
+# Default lives on VantageGeminiLiveModel (app/gemini_live_model.py).
 # Override with GEMINI_LIVE_MODEL if needed.
 DEFAULT_MODEL_ID = "gemini-3.1-flash-live-preview"
 
@@ -83,7 +82,7 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
     # model stamps on bidi_audio_stream (use-live-agent.ts).
     provider_config: dict[str, Any] = {"audio": {"voice": voice, "input_rate": BROWSER_MIC_RATE}}
 
-    from strands.experimental.bidi.models.gemini_live import BidiGeminiLiveModel
+    from app.gemini_live_model import VantageGeminiLiveModel
 
     # SDK-default config: AUDIO responses with input/output transcription.
     # gemini-3.1-flash-live-preview rejects TEXT-only response modalities,
@@ -97,7 +96,7 @@ def build_model(provider: str, mode: str, voice: str) -> Any:
         inference_config["thinking_config"] = {"thinking_level": thinking_level}
     provider_config["inference"] = inference_config
 
-    return BidiGeminiLiveModel(
+    return VantageGeminiLiveModel(
         model_id=PROVIDERS["gemini"]["model_id"],
         provider_config=provider_config,
         client_config={"api_key": api_key} if api_key else None,
