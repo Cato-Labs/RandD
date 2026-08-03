@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,8 @@ async def protect_tenant_surfaces(request: Request, call_next):
     ))
     if protected and request.url.path not in public:
         try:
-            VANTAGE.context_from_token(request.cookies.get("vantage_session"))
+            token = request.cookies.get("vantage_session")
+            VANTAGE.context_from_token(token) if token else VANTAGE.configured_context()
         except Exception:
             return JSONResponse(status_code=401, content={"error": {
                 "code": "not_authenticated", "message": "A valid Vantage session is required",
@@ -326,7 +328,7 @@ async def get_workspace() -> dict[str, Any]:
 @app.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: str = Query(...),
+    token: str | None = Query(None),
     mode: str = Query("audio", pattern="^(audio|text)$"),
     voice: str = Query("Puck"),
     provider: str = Query(DEFAULT_PROVIDER, pattern="^gemini$"),
@@ -338,19 +340,22 @@ async def websocket_endpoint(
     concurrently, and tears everything down via ``stop_all``. This endpoint
     does not reproduce or supervise that loop.
 
-    Authentication uses the short-lived, single-use organization token minted
-    by ``/api/auth/ws-token`` because browsers cannot set WebSocket headers.
+    Deployed instances use the configured access identity when no explicit
+    session token is supplied.
     """
-    if VANTAGE.token_service is None:
-        await websocket.close(code=1013, reason="Vantage authentication is not configured")
-        return
     try:
-        claims = VANTAGE.token_service.consume_ws_token(token)
-        context = VANTAGE.context_from_claims(claims)
+        if token:
+            if VANTAGE.token_service is None:
+                raise RuntimeError("Vantage authentication is not configured")
+            claims = VANTAGE.token_service.consume_ws_token(token)
+            context = VANTAGE.context_from_claims(claims)
+            session_id = str(claims["jti"])
+        else:
+            context = VANTAGE.configured_context()
+            session_id = str(uuid.uuid4())
     except Exception:
-        await websocket.close(code=4401, reason="Invalid or replayed WebSocket token")
+        await websocket.close(code=1013, reason="Configured Vantage access is unavailable")
         return
-    session_id = str(claims["jti"])
     await websocket.accept()
     await websocket.send_text(json.dumps({"type": "media_session", "sessionId": session_id}))
     if not PROVIDERS.get(provider, {}).get("enabled", True):

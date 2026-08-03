@@ -224,6 +224,16 @@ class VantageRuntime:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is invalid") from exc
         return self.context_from_claims(claims)
 
+    def configured_context(self) -> TenantContext:
+        if not self.access_email:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Configured access is unavailable")
+        user, memberships = self.memberships(self.access_email.strip().lower())
+        if user is None or not memberships:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Configured access identity is unavailable")
+        active_org = memberships[0]["organization_id"]
+        roles = [item["role"] for item in memberships if item["organization_id"] == active_org]
+        return self.context_from_claims({"sub": user["id"], "org_id": active_org, "roles": roles})
+
     def context_from_claims(self, claims: dict[str, Any]) -> TenantContext:
         if self.database is None:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is unavailable")

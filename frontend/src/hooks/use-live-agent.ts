@@ -57,9 +57,9 @@ type SubmitPayload = {
   files: { url: string; mediaType: string; filename?: string }[];
 };
 
-const wsUrl = (mode: SessionMode, voice: string, provider: string, token: string) => {
+const wsUrl = (mode: SessionMode, voice: string, provider: string) => {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/ws?token=${encodeURIComponent(token)}&mode=${mode}&voice=${encodeURIComponent(voice)}&provider=${encodeURIComponent(provider)}`;
+  return `${proto}://${window.location.host}/ws?mode=${mode}&voice=${encodeURIComponent(voice)}&provider=${encodeURIComponent(provider)}`;
 };
 
 export const useLiveAgent = () => {
@@ -653,17 +653,8 @@ export const useLiveAgent = () => {
     setError(null);
     setStatus("connecting");
     playerRef.current = new PcmPlayer(setSpeaking);
-    const tokenResponse = await fetch("/api/auth/ws-token", { method: "POST" });
-    if (!tokenResponse.ok) {
-      if (attempt !== connectionAttemptRef.current) return;
-      setError("Authentication is required before connecting to the live agent.");
-      setStatus("disconnected");
-      setChatStatus("error");
-      return;
-    }
-    const { token } = (await tokenResponse.json()) as { token: string };
     if (attempt !== connectionAttemptRef.current) return;
-    const socket = new WebSocket(wsUrl(mode, voice, model, token));
+    const socket = new WebSocket(wsUrl(mode, voice, model));
     socketRef.current = socket;
     socket.onmessage = (message) => {
       if (socketRef.current !== socket) return;

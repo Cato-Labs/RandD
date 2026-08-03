@@ -26,7 +26,9 @@ class OrganizationBody(BaseModel):
 
 def session_context(runtime: VantageRuntime):
     def dependency(vantage_session: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None) -> TenantContext:
-        return runtime.context_from_token(vantage_session)
+        if vantage_session:
+            return runtime.context_from_token(vantage_session)
+        return runtime.configured_context()
     return dependency
 
 
