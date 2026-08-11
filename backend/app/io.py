@@ -92,16 +92,30 @@ class BidiWebSocketInput:
                         mime_type = header[5:].split(";", 1)[0] or mime_type
                 browser_camera.add_frame(encoded)
                 return BidiImageInputEvent(image=encoded, mime_type=mime_type)
+            # Construct SDK events with their documented fields only —
+            # constructors take exact keyword args, so stray browser keys
+            # must never be splatted through.
             if event_type == "bidi_text_input":
-                return BidiTextInputEvent(**data)
+                return BidiTextInputEvent(
+                    text=str(data.get("text") or ""),
+                    role=data.get("role", "user"),
+                )
             if event_type == "bidi_audio_input":
-                return BidiAudioInputEvent(**data)
+                return BidiAudioInputEvent(
+                    audio=str(data.get("audio") or ""),
+                    format=data.get("format", "pcm"),
+                    sample_rate=int(data.get("sample_rate", 16000)),
+                    channels=int(data.get("channels", 1)),
+                )
             if event_type == "bidi_image_input":
                 # Tee the frame so capture tools (take_photo/take_video) can
                 # grab the device camera's view server-side.
                 if isinstance(data.get("image"), str):
                     browser_camera.add_frame(data["image"])
-                return BidiImageInputEvent(**data)
+                return BidiImageInputEvent(
+                    image=str(data.get("image") or ""),
+                    mime_type=str(data.get("mime_type") or "image/jpeg"),
+                )
 
 
 class BidiWebSocketOutput:
