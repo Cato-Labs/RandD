@@ -136,16 +136,18 @@ def test_yolo_serializes_multiple_official_ultralytics_boxes():
     assert serialized["height"] == 200
     assert serialized["objects"] == {"chair": 1, "person": 1}
     assert len(serialized["detections"]) == 2
+    # Canonical yolo_vision format: {object, confidence, bbox: [x1,y1,x2,y2] pixel coords}
     assert serialized["detections"][0] == {
-        "x1": pytest.approx(0.1),
-        "y1": pytest.approx(0.1),
-        "x2": pytest.approx(0.5),
-        "y2": pytest.approx(0.9),
-        "confidence": pytest.approx(0.91),
-        "classId": 0,
-        "label": "person",
+        "object": "person",
+        "confidence": pytest.approx(0.91, abs=1e-3),
+        "bbox": [
+            pytest.approx(40.0),
+            pytest.approx(20.0),
+            pytest.approx(200.0),
+            pytest.approx(180.0),
+        ],
     }
-    assert serialized["detections"][1]["label"] == "chair"
+    assert serialized["detections"][1]["object"] == "chair"
 
 
 def test_yolo_continuous_monitor_keeps_authenticated_camera_session():

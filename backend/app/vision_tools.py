@@ -29,13 +29,17 @@ def _load_model(model_name: str = "yolov8n.pt"):
 
 
 def _serialize_result(result: Any) -> dict[str, Any]:
-    """Serialize official Ultralytics ``Results.boxes`` into normalized UI metadata."""
+    """Serialize official Ultralytics ``Results.boxes`` per the canonical yolo_vision format.
+
+    Each detection is ``{"object", "confidence", "bbox": [x1, y1, x2, y2]}`` with
+    pixel coordinates (``boxes.xyxy``), matching strands_fun_tools.yolo_vision.
+    """
     def values(data: Any) -> list[Any]:
         if hasattr(data, "cpu"):
             data = data.cpu()
         return data.tolist()
 
-    coordinates = values(result.boxes.xyxyn)
+    coordinates = values(result.boxes.xyxy)
     confidences = values(result.boxes.conf)
     class_ids = values(result.boxes.cls)
     detections = []
@@ -44,13 +48,9 @@ def _serialize_result(result: Any) -> dict[str, Any]:
         label = result.names[int(class_id)]
         detections.append(
             {
-                "x1": float(box[0]),
-                "y1": float(box[1]),
-                "x2": float(box[2]),
-                "y2": float(box[3]),
-                "confidence": float(score),
-                "classId": int(class_id),
-                "label": label,
+                "object": label,
+                "confidence": round(float(score), 3),
+                "bbox": [float(box[0]), float(box[1]), float(box[2]), float(box[3])],
             }
         )
         objects[label] += 1
