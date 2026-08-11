@@ -202,6 +202,7 @@ subprocess.run(
 print("Syncing project files to EC2 via rsync...")
 exclude_args = [
     "--exclude", "/.env",  # uploaded separately below
+    "--exclude", "/backend/.env",  # host-owned (production DATABASE_URL etc.)
     "--exclude", "/.git/",
     "--exclude", "/str_qc.sqlite",  # production data is host-owned
     "--exclude", "/str_qc.sqlite.backup-*",
