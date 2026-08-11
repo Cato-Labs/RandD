@@ -337,7 +337,7 @@ def test_memory_namespace_is_tenant_safe():
         memory_namespace("org-1", "portfolio-1", "../home-2")
 
 
-def test_agent_uses_six_core_and_session_tools(monkeypatch):
+def test_agent_registers_full_baseline_and_session_tools(monkeypatch):
     import app.agent as agent_module
 
     captured = {}
@@ -367,15 +367,36 @@ def test_agent_uses_six_core_and_session_tools(monkeypatch):
         or getattr(item, "__name__", "").rsplit(".", 1)[-1]
         for item in captured["tools"]
     }
-    assert names == {
+    # Direct project @tool functions and native tools are registered before
+    # the connection starts (AGENTS.md nonnegotiable) — not lazily via load_tool.
+    assert {
+        # meta-tooling primitives
         "shell",
         "editor",
         "load_tool",
         "mcp_client",
         "http_request",
         "environment",
+        # inspection capture / vision
+        "control_camera",
+        "take_photo",
+        "take_video",
+        "yolo_vision",
+        "request_photo_approval",
+        # checklist journal
+        "list_checklist_items",
+        "record_checklist_result",
+        "record_section_note",
+        "attach_item_photo",
+        # walkthrough clips + delivery
+        "list_walkthrough_videos",
+        "send_video_to_slack",
+        "send_report_to_slack",
+        "slack",
+        "slack_send_message",
+        # session-scoped tool passed by the caller
         "session_inventory_tool",
-    }
+    } <= names
     assert captured.get("load_tools_from_directory", False) is False
     assert "Use all available tools implicitly" not in captured["system_prompt"]
     assert "Never scan the filesystem root" in captured["system_prompt"]

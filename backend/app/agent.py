@@ -5,6 +5,7 @@ from typing import Any
 from strands.experimental.bidi.agent import BidiAgent
 from strands_tools import batch, editor, environment, http_request, image_reader, load_tool, mcp_client, shell
 from strands_tools.graph import graph
+from strands_tools.slack import slack, slack_send_message
 from strands_tools.swarm import swarm
 from strands_tools.use_agent import use_agent
 from strands_tools.workflow import workflow
@@ -20,7 +21,8 @@ from app.gmail_attachments import gmail_send_with_attachments
 from app.kb_archive import archive_inspection_report, save_site_memory
 from app.memory import memory_tools
 from app.prompts import SYSTEM_PROMPT
-from app.walkthrough_videos import list_walkthrough_videos
+from app.slack_report import send_report_to_slack
+from app.walkthrough_videos import list_walkthrough_videos, send_video_to_slack
 from app.qc_journal import (
     attach_item_photo,
     list_checklist_items,
@@ -55,20 +57,54 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 
-# Baseline registry: only the native meta-tooling primitives are registered up
-# front. The native `load_tool` tool loads any other tool on demand from its file
-# path; `mcp_client` reaches remote MCP tools. All tool imports above are kept
-# intentionally so every module stays importable for load_tool. Session-scoped
-# tools are injected per connection in app/main.py. A tool loaded during a live
-# turn is declared through a graceful session restart and is callable starting
-# with the next turn.
+# Full baseline registry, per AGENTS.md: direct native tools and direct
+# project @tool functions are registered before one native BidiAgent.run
+# connection starts. Session-scoped tools are injected per connection in
+# app/main.py; `load_tool` remains available for anything else.
 TOOLS = [
+    # QC turnover inspection journal (routes to the live checklist form)
+    list_checklist_items,
+    record_checklist_result,
+    record_section_note,
+    attach_item_photo,
+    # Inspector's browser camera (frontend executes the start/stop/snap)
+    control_camera,
+    request_photo_approval,
+    # Device-camera capture: browser stream first, server hardware fallback
+    take_photo,
+    take_video,
+    # Access session-scoped walkthrough clips after the fact.
+    list_walkthrough_videos,
+    # YOLO object detection over the device-camera stream
+    yolo_vision,
+    # Runtime: code, files, environment, dynamic tool discovery, MCP, network
     editor.editor,
     shell.shell,
     load_tool.load_tool,
+    list_library_tools,
     mcp_client.mcp_client,
     http_request,
     environment,
+    # Visual inspection for screenshots produced by the session's browser tool.
+    image_reader,
+    # Multi-agent formations
+    use_agent,
+    batch,
+    workflow,
+    swarm,
+    graph,
+    # Delivery and Google integrations
+    slack,
+    slack_send_message,
+    send_report_to_slack,
+    use_google,
+    google_auth,
+    gmail_send,
+    gmail_reply,
+    gmail_send_with_attachments,
+    send_video_to_slack,
+    archive_inspection_report,
+    save_site_memory,
 ]
 
 
